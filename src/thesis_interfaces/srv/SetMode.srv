@@ -1,0 +1,4 @@
+int8 requested_mode
+---
+bool success
+string message
