@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'optitrack_bridge = thesis_optitrack_bridge.optitrack_bridge_node:main'
         ],
     },
 )
