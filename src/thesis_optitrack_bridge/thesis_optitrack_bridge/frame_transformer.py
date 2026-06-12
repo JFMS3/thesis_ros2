@@ -1,7 +1,7 @@
 import numpy as np
 
 class FrameTransformer:
-    def quat_to_euler(orientation):
+    def quat_to_euler(self, orientation):
         x = orientation.x
         y = orientation.y
         z = orientation.z

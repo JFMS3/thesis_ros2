@@ -18,6 +18,9 @@ mocap_node:
                 child_frame_id: "Platform/base_link"
                 parent_frame_id: "world"
         optitrack_config:
+                server_address: "127.0.0.1"
+                local_address: "127.0.0.1"
+                use_multicast: false
                 multicast_address: "239.255.42.99"
                 command_port: 1510
                 data_port: 1511
