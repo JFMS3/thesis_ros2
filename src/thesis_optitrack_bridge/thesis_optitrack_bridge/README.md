@@ -99,3 +99,8 @@ colcon build --symlink-install --packages-select thesis_optitrack_bridge
 source install/setup.bash
 ros2 run thesis_optitrack_bridge optitrack_bridge
 ```
+
+For logging a run:
+```
+ros2 bag record -o ~/thesis_ros2/bags/run_$(date +%Y%m%d_%H%M%S) /quadcopter_state
+```

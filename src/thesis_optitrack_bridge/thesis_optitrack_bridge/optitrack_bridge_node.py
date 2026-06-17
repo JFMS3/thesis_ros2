@@ -43,11 +43,11 @@ class OptitrackBridgeNode(Node):
         if not self.client.run("d"):
             self.get_logger().error("NatNet Client failed to start")
             return
-
         self.get_logger().info("Optitrack bridge has started!")
 
+
     def rigid_body_callback(self, new_id, position, rotation):
-        self.get_logger().info(f"Got rigit body id = {new_id} with position {position} and rotation {rotation}")
+        self.get_logger().info(f"Got rigid body id = {new_id} with position {position} and rotation {rotation}")
         if new_id == self.drone_id:
             self.publish_drone(position, rotation)
         elif new_id == self.platform_id:
