@@ -38,35 +38,3 @@ ax[-1].set_xlabel("Sample")
 plt.tight_layout()
 plt.show()
 
-def quat_to_euler(q):
-    x, y, z, w = q
-
-    sinr_cosp = 2 * (w * x + y * z)
-    cosr_cosp = 1 - 2 * (x * x + y * y)
-    roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-    sinp = 2 * (w * y - z * x)
-    sinp = np.clip(sinp, -1.0, 1.0)
-    pitch = np.arcsin(sinp)
-
-    siny_cosp = 2 * (w * z + x * y)
-    cosy_cosp = 1 - 2 * (y * y + z * z)
-    yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-    return roll, pitch, yaw
-
-euler_data = np.array([quat_to_euler(q) for q in rotation_data])
-euler_deg = np.rad2deg(euler_data)
-fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 8))
-
-labels = ["Roll (deg)", "Pitch (deg)", "Yaw (deg)"]
-
-for i in range(3):
-    ax[i].plot(euler_deg[:, i])
-    ax[i].set_ylabel(labels[i])
-    ax[i].grid(True)
-
-ax[-1].set_xlabel("Sample")
-
-plt.tight_layout()
-plt.show()
