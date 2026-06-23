@@ -26,8 +26,8 @@ class OptitrackBridgeNode(Node):
         self.client_address = self.get_parameter('client_address').value
         self.use_multicast = self.get_parameter('use_multicast').value
 
-        self.drone_publisher = self.create_publisher(QuadcopterState, 'quadcopter_state', 10)
-        self.platform_publisher = self.create_publisher(PlatformState, 'platform_state', 10)
+        self.drone_publisher = self.create_publisher(QuadcopterState, 'quadcopter_state', qos)
+        self.platform_publisher = self.create_publisher(PlatformState, 'platform_state', qos)
 
         self.transformer = FrameTransformer()
         self.get_logger().info("Optitrack bridge node has begun!")
