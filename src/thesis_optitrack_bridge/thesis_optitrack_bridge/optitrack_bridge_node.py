@@ -26,8 +26,8 @@ class OptitrackBridgeNode(Node):
         self.client_address = self.get_parameter('client_address').value
         self.use_multicast = self.get_parameter('use_multicast').value
 
-        self.drone_publisher = self.create_publisher(QuadcopterState, 'quadcopter_state', qos)
-        self.platform_publisher = self.create_publisher(PlatformState, 'platform_state', qos)
+        self.drone_publisher = self.create_publisher(QuadcopterState, 'measured_quadcopter_state', qos)
+        self.platform_publisher = self.create_publisher(PlatformState, 'measured_platform_state', qos)
 
         self.level_plane = None # ground plane not perfectly flat in Motive
         self.transformer = FrameTransformer()
