@@ -29,6 +29,7 @@ class OptitrackBridgeNode(Node):
         self.drone_publisher = self.create_publisher(QuadcopterState, 'quadcopter_state', qos)
         self.platform_publisher = self.create_publisher(PlatformState, 'platform_state', qos)
 
+        self.level_plane = None # ground plane not perfectly flat in Motive
         self.transformer = FrameTransformer()
         self.get_logger().info("Optitrack bridge node has begun!")
 
@@ -55,11 +56,17 @@ class OptitrackBridgeNode(Node):
 
     
     def publish_drone(self, position, rotation):
+        q_now = self.transformer.normalise_quat(rotation)
+        if self.level_plane is None:
+            self.level_plane = q_now.copy()
+
+        q_relative = self.transformer.quat_multiply(
+            q_now,
+            self.transformer.quat_conjugate(self.level_plane)
+        )
+
         q = Quaternion()
-        q.x = float(rotation[0])
-        q.y = float(rotation[1])
-        q.z = float(rotation[2])
-        q.w = float(rotation[3])
+        q.x, q.y, q.z, q.w = q_relative
         phi, theta, _ = self.transformer.quat_to_euler(q)
 
         drone_msg = QuadcopterState()
