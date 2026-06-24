@@ -2,10 +2,16 @@ import numpy as np
 
 class FrameTransformer:
     def quat_to_euler(self, orientation):
-        x = orientation.x
-        y = orientation.y
-        z = orientation.z
-        w = orientation.w
+        if isinstance(orientation, (np.ndarray, list)):
+            x = orientation[0]
+            y = orientation[1]
+            z = orientation[2]
+            w = orientation[3]
+        else:
+            x = orientation.x
+            y = orientation.y
+            z = orientation.z
+            w = orientation.w
 
         sinr_cosp = 2 * (w * x + y * z)
         cosr_cosp = 1 - 2 * (x * x + y * y)

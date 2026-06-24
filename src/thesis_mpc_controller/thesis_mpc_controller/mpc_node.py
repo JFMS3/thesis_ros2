@@ -3,7 +3,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand
 from .mpc_solver import MPCSolver
-from .observer import Observer
+from .kalman_filter import Observer
 import numpy as np
 
 class MPCNode(Node):

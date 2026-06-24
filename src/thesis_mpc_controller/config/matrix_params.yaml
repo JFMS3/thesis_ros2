@@ -1,0 +1,3 @@
+/kalman_filter:
+  ros__parameters:
+    r_matrix_diagonal: [4.21157110e-11, 9.82080281e-10, 1.58729592e-10, 3.21244190e-08, 2.73910098e-08]

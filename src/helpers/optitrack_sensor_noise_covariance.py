@@ -1,17 +1,10 @@
 import numpy as np
 from pathlib import Path
 import re
-import os
-import sys
-
-src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
-
-from thesis_optitrack_bridge.thesis_optitrack_bridge.frame_transformer import FrameTransformer
+from thesis_optitrack_bridge.frame_transformer import FrameTransformer
 
 
-logpath = Path.home() / ".ros" / "log" / "python3_18481_1782196456788.log"
+logpath = Path.home() / ".ros" / "log" / "python3_8571_1782280280689.log"
 pattern = r"position \((.*?)\) and rotation \((.*?)\)"
 position_list = []
 rotation_list = []
