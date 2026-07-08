@@ -7,3 +7,12 @@
     P_vel_init: 0.1
     nis_threshold: 11.34
     max_dt: 0.1
+
+/mcp_solver:
+  ros__parameters:
+    A_x: 0.6
+    A_y: 0.6
+    A_z: 0.6
+    tau_phi: 1.0
+    tau_theta: 1.0
+    m: 40e-3 # mass of CrazyFlie [kg]
