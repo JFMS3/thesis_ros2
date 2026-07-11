@@ -8,7 +8,7 @@
     nis_threshold: 11.34
     max_dt: 0.1
 
-/mcp_solver:
+/mpc_solver:
   ros__parameters:
     A_x: 0.6
     A_y: 0.6
