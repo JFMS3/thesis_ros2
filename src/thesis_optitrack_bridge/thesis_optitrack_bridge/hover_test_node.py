@@ -12,8 +12,8 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-TARGET_HEIGHT = 0.5
-HOVER_DURATION = 5
+TARGET_HEIGHT = 1.5
+HOVER_DURATION = 8
 LAND_DURATION = 3
 
 class QuadcopterSequence(Enum):
@@ -32,11 +32,13 @@ class HoverTestNode(Node):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
         self.got_first_state = False
+        self.starting_position = []
         self.sequence = QuadcopterSequence.WAITING_FOR_STATE
         self.state_entered_at = self.get_clock().now()
+        self.target_z = None
 
         self.subscription = self.create_subscription(
-            QuadcopterState, '/quadcopter_state', self.sequence_callback, qos
+            QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
         )
 
         cflib.crtp.init_drivers()
@@ -55,6 +57,10 @@ class HoverTestNode(Node):
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
+        if not self.got_first_state:
+            self.get_logger().info(f"Got starting position {x}, {y}, {z}")
+            self.starting_position = [x, y, z]
+            self.target_z = z + TARGET_HEIGHT
         self.got_first_state = True
         try:
             self.cf.extpos.send_extpos(x, y, z)
@@ -77,6 +83,19 @@ class HoverTestNode(Node):
             self.sync_cf.close_link()
         except Exception:
             pass
+
+    def emergency_land(self):
+        if self.sequence in (QuadcopterSequence.DONE, QuadcopterSequence.WAITING_FOR_STATE):
+            return
+        self.get_logger().warn("Interrupted, trying a safe landing")
+        try:
+            land_height = self.starting_position[2] if self.starting_position else 0
+            self.cf.high_level_commander.land(absolute_height_m=land_height, duration_s=LAND_DURATION)
+            time.sleep(LAND_DURATION + 0.5)
+            self.cf.high_level_commander.stop()
+            self.get_logger().warn("Emergency landing complete")
+        except Exception as e:
+            self.get_logger().error(f"Failed to emergency land {e}")
     
 
     def step_sequence(self):
@@ -88,28 +107,28 @@ class HoverTestNode(Node):
                 self.cf.param.set_value('kalman.resetEstimation', '0')
 
                 self.enter_state(QuadcopterSequence.STARTING_ESTIMATOR)
-            elif self.time_elapsed() > 15:
+            elif self.time_elapsed() > 30:
                 self.get_logger().error("No quadcopter state received in time, aborting...")
                 self.shutdown()
         elif self.sequence == QuadcopterSequence.STARTING_ESTIMATOR:
             if self.time_elapsed() > 2:
                 self.get_logger().info("Arming...")
-                self.cf.platform.send_arming_request(True)
+                self.cf.supervisor.send_arming_request(True)
                 self.enter_state(QuadcopterSequence.ARMING)
         elif self.sequence == QuadcopterSequence.ARMING:
             if self.time_elapsed() > 1:
                 self.get_logger().info("Taking off...")
-                self.cf.high_level_commander.takeoff(TARGET_HEIGHT, HOVER_DURATION)
+                self.cf.high_level_commander.takeoff(self.target_z, HOVER_DURATION)
                 self.enter_state(QuadcopterSequence.TAKEOFF)
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > HOVER_DURATION + 0.5:
-                self.get_logger().info(f"Beginning hover at {TARGET_HEIGHT}m for {HOVER_DURATION}s")
-                self.cf.high_level_commander.go_to(x=0, y=0, z=TARGET_HEIGHT, yaw=0, duration_s=HOVER_DURATION)
+                self.get_logger().info(f"Beginning hover at {self.target_z}m for {HOVER_DURATION}s")
+                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=HOVER_DURATION)
                 self.enter_state(QuadcopterSequence.HOVERING)
         elif self.sequence == QuadcopterSequence.HOVERING:
             if self.time_elapsed() > HOVER_DURATION:
                 self.get_logger().info(f"Landing...")
-                self.cf.high_level_commander.land(absolute_height_m=0, duration_s=LAND_DURATION)
+                self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)
                 self.enter_state(QuadcopterSequence.LANDING)
         elif self.sequence == QuadcopterSequence.LANDING:
             if self.time_elapsed() > LAND_DURATION + 0.5:
@@ -127,8 +146,12 @@ def main():
 
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().warn("Keyboard interrupt received")
+        node.emergency_land()
     except Exception as e:
-        print(f"ERROR: {e}")
+        node.get_logger().warn(f"ERROR: {e}")
+        node.emergency_land()
     finally:
         try:
             node.sync_cf.close_link()
@@ -145,7 +168,12 @@ if __name__ == '__main__':
 usbipd list
 usbipd bind --busid <BUS_ID> (in powershell admin)
 usbipd attach --wsl --busid <BUS_ID>
+
+usbipd detach --busid 1-1 (to detach, useful for entering GUI if it crashes)
+
+(In WSL)
 lsusb
+sudo chmod 666 /dev/bus/usb/001/<ID from lsusb>
 
 colcon build --packages-select thesis_optitrack_bridge
 ros2 run thesis_optitrack_bridge hover_test_node
