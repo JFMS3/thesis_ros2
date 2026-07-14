@@ -3,6 +3,7 @@ from enum import Enum, auto
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from math import sqrt
 
 from thesis_interfaces.msg import QuadcopterState
 
@@ -15,6 +16,7 @@ RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
 TARGET_HEIGHT = 1.5
 HOVER_DURATION = 8
 LAND_DURATION = 3
+MAX_POSSIBLE_SPEED = 3
 
 class QuadcopterSequence(Enum):
     WAITING_FOR_STATE = auto()
@@ -36,6 +38,9 @@ class HoverTestNode(Node):
         self.sequence = QuadcopterSequence.WAITING_FOR_STATE
         self.state_entered_at = self.get_clock().now()
         self.target_z = None
+        self.last_valid_pos = None
+        self.last_valid_time = None
+        self.rejected_count = 0
 
         self.subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
@@ -57,11 +62,29 @@ class HoverTestNode(Node):
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
+        now = self.get_clock().now()
+
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
             self.starting_position = [x, y, z]
             self.target_z = z + TARGET_HEIGHT
+        elif self.last_valid_pos is not None:
+            dt = (now - self.last_valid_time).nanoseconds / 1e9
+            if dt > 0:
+                dist = sqrt(
+                    (x - self.last_valid_pos[0]) ** 2 +
+                    (y - self.last_valid_pos[1]) ** 2 +
+                    (z - self.last_valid_pos[2]) ** 2
+                )
+                implied_speed = dist / dt
+                if implied_speed > MAX_POSSIBLE_SPEED:
+                    self.rejected_count += 1
+                    self.get_logger().warn(f"Rejecting optitrack jump of {dist}m over {dt}s. Rejected counter: {self.rejected_count}")
+                    return
+
         self.got_first_state = True
+        self.last_valid_pos = (x, y, z)
+        self.last_valid_time = now
         try:
             self.cf.extpos.send_extpos(x, y, z)
         except Exception as e:
