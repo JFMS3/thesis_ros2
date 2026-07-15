@@ -41,6 +41,7 @@ class HoverTestNode(Node):
         self.last_valid_pos = None
         self.last_valid_time = None
         self.rejected_count = 0
+        self.consecutive_rejects = 0
 
         self.last_msg_time = None
         self.max_gap_seen = 0
@@ -77,6 +78,11 @@ class HoverTestNode(Node):
         y = msg.position[1]
         z = msg.position[2]
 
+        if z > 2:
+            self.cf.commander.send_stop_setpoint()
+            self.get_logger().warn("Climbed too high, cutting power!")
+            return
+        
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
             self.starting_position = [x, y, z]
@@ -92,12 +98,14 @@ class HoverTestNode(Node):
                 implied_speed = dist / dt
                 if implied_speed > MAX_POSSIBLE_SPEED:
                     self.rejected_count += 1
-                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}")
-                    return
+                    self.consecutive_rejects += 1
+                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
+                    if self.consecutive_rejects < 5:
+                        return
+                    self.get_logger().warn("5 consecutive rejects, treating as real motion and accepting")
+                else:
+                    self.consecutive_rejects = 0
 
-        if z > 2:
-            self.cf.commander.send_stop_setpoint()
-            self.get_logger().warn("Climbed too high, cutting power!")
 
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
