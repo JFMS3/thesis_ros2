@@ -13,7 +13,7 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-TARGET_HEIGHT = 1.5
+TARGET_HEIGHT = 0.25
 HOVER_DURATION = 8
 LAND_DURATION = 3
 MAX_POSSIBLE_SPEED = 3
@@ -42,6 +42,10 @@ class HoverTestNode(Node):
         self.last_valid_time = None
         self.rejected_count = 0
 
+        self.last_msg_time = None
+        self.max_gap_seen = 0
+        self.gap_count = 0
+
         self.subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
         )
@@ -59,10 +63,19 @@ class HoverTestNode(Node):
         
 
     def sequence_callback(self, msg: QuadcopterState):
+        now = self.get_clock().now()
+        if self.last_msg_time is not None:
+            gap = (now - self.last_msg_time).nanoseconds/1e9
+            if gap > 0.15:
+                self.gap_count += 1
+                self.get_logger().warn(f"Optitrack gap of {gap*1000:.1f}ms since last message (gap count: {self.gap_count})")
+            if gap > self.max_gap_seen:
+                self.max_gap_seen = gap
+        
+        self.last_msg_time = now
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
-        now = self.get_clock().now()
 
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
@@ -79,8 +92,12 @@ class HoverTestNode(Node):
                 implied_speed = dist / dt
                 if implied_speed > MAX_POSSIBLE_SPEED:
                     self.rejected_count += 1
-                    self.get_logger().warn(f"Rejecting optitrack jump of {dist}m over {dt}s. Rejected counter: {self.rejected_count}")
+                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}")
                     return
+
+        if z > 2:
+            self.cf.commander.send_stop_setpoint()
+            self.get_logger().warn("Climbed too high, cutting power!")
 
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
@@ -101,6 +118,7 @@ class HoverTestNode(Node):
     
 
     def shutdown(self):
+        self.get_logger().info(f"Max gap: {self.max_gap_seen}, no. gaps: {self.gap_count}")
         self.timer.cancel()
         try:
             self.sync_cf.close_link()
@@ -139,7 +157,7 @@ class HoverTestNode(Node):
                 self.cf.supervisor.send_arming_request(True)
                 self.enter_state(QuadcopterSequence.ARMING)
         elif self.sequence == QuadcopterSequence.ARMING:
-            if self.time_elapsed() > 1:
+            if self.time_elapsed() > 5:
                 self.get_logger().info("Taking off...")
                 self.cf.high_level_commander.takeoff(self.target_z, HOVER_DURATION)
                 self.enter_state(QuadcopterSequence.TAKEOFF)
@@ -192,13 +210,12 @@ usbipd list
 usbipd bind --busid <BUS_ID> (in powershell admin)
 usbipd attach --wsl --busid <BUS_ID>
 
-usbipd detach --busid 1-1 (to detach, useful for entering GUI if it crashes)
-
 (In WSL)
 lsusb
 sudo chmod 666 /dev/bus/usb/001/<ID from lsusb>
 
 colcon build --packages-select thesis_optitrack_bridge
+source install/setup.bash
 ros2 run thesis_optitrack_bridge hover_test_node
 
 (when done)
