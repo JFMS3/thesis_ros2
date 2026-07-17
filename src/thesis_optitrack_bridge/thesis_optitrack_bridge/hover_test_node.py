@@ -13,10 +13,10 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-TARGET_HEIGHT = 0.25
+
 HOVER_DURATION = 8
 LAND_DURATION = 3
-MAX_POSSIBLE_SPEED = 3
+MAX_POSSIBLE_SPEED = 5
 
 class QuadcopterSequence(Enum):
     WAITING_FOR_STATE = auto()
@@ -47,6 +47,11 @@ class HoverTestNode(Node):
         self.max_gap_seen = 0
         self.gap_count = 0
 
+        self.declare_parameter('TARGET_HEIGHT', 0.05)
+        self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
+        self.declare_parameter('MAX_HEIGHT', 2.0)
+        self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
+
         self.subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
         )
@@ -67,7 +72,7 @@ class HoverTestNode(Node):
         now = self.get_clock().now()
         if self.last_msg_time is not None:
             gap = (now - self.last_msg_time).nanoseconds/1e9
-            if gap > 0.15:
+            if gap > 0.15 and self.sequence != QuadcopterSequence.WAITING_FOR_STATE:
                 self.gap_count += 1
                 self.get_logger().warn(f"Optitrack gap of {gap*1000:.1f}ms since last message (gap count: {self.gap_count})")
             if gap > self.max_gap_seen:
@@ -78,15 +83,15 @@ class HoverTestNode(Node):
         y = msg.position[1]
         z = msg.position[2]
 
-        if z > 2:
-            self.cf.commander.send_stop_setpoint()
+        if z > self.MAX_HEIGHT:
+            self.cf.high_level_commander.stop()
             self.get_logger().warn("Climbed too high, cutting power!")
             return
         
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
             self.starting_position = [x, y, z]
-            self.target_z = z + TARGET_HEIGHT
+            self.target_z = z + self.TARGET_HEIGHT
         elif self.last_valid_pos is not None:
             dt = (now - self.last_valid_time).nanoseconds / 1e9
             if dt > 0:
@@ -99,13 +104,13 @@ class HoverTestNode(Node):
                 if implied_speed > MAX_POSSIBLE_SPEED:
                     self.rejected_count += 1
                     self.consecutive_rejects += 1
-                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
+                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s ({implied_speed:.3f}). \
+                                           Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
                     if self.consecutive_rejects < 5:
                         return
                     self.get_logger().warn("5 consecutive rejects, treating as real motion and accepting")
                 else:
                     self.consecutive_rejects = 0
-
 
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
@@ -148,6 +153,16 @@ class HoverTestNode(Node):
     
 
     def step_sequence(self):
+        if self.sequence not in (QuadcopterSequence.DONE, QuadcopterSequence.WAITING_FOR_STATE, QuadcopterSequence.STARTING_ESTIMATOR):
+            if self.last_msg_time is not None:
+                since_last = (self.get_clock().now() - self.last_msg_time).nanoseconds / 1e9
+                if since_last > 0.5:
+                    self.get_logger().error(f"No Optitrack data for {since_last:.2f}s, emergency stopping")
+                    self.cf.high_level_commander.stop()
+                    self.cf.commander.send_stop_setpoint()
+                    self.emergency_stop = True
+                    return
+
         if self.sequence == QuadcopterSequence.WAITING_FOR_STATE:
             if self.got_first_state:
                 self.get_logger().info("Got first state, now resetting estimator")
@@ -172,7 +187,7 @@ class HoverTestNode(Node):
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > HOVER_DURATION + 0.5:
                 self.get_logger().info(f"Beginning hover at {self.target_z}m for {HOVER_DURATION}s")
-                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=HOVER_DURATION)
+                #self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=HOVER_DURATION)
                 self.enter_state(QuadcopterSequence.HOVERING)
         elif self.sequence == QuadcopterSequence.HOVERING:
             if self.time_elapsed() > HOVER_DURATION:
@@ -187,6 +202,7 @@ class HoverTestNode(Node):
                 self.timer.cancel()
         elif self.sequence == QuadcopterSequence.DONE:
             pass
+        
 
 
 def main():
