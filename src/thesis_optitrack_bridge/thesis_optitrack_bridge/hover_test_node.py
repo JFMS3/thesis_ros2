@@ -11,12 +11,15 @@ import cflib.crtp
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
+import csv
+from cflib.crazyflie.log import LogConfig
+from datetime import datetime
+
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-
 HOVER_DURATION = 8
 LAND_DURATION = 3
-MAX_POSSIBLE_SPEED = 5
+MAX_POSSIBLE_SPEED = 3
 
 class QuadcopterSequence(Enum):
     WAITING_FOR_STATE = auto()
@@ -46,6 +49,7 @@ class HoverTestNode(Node):
         self.last_msg_time = None
         self.max_gap_seen = 0
         self.gap_count = 0
+        self.emergency_stopped = False
 
         self.declare_parameter('TARGET_HEIGHT', 0.05)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
@@ -64,15 +68,38 @@ class HoverTestNode(Node):
         self.cf = self.sync_cf.cf
         self.get_logger().info("Radio link set up")
 
+        now = self.get_clock().now()
+        dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
+        self.log_file = open(f'hover_test_log_{dt_object.strftime("%H_%M_%S")}.csv', 'w', newline='')
+        self.csv_writer = csv.writer(self.log_file)
+        self.csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'x', 'y', 'z', 'extra'])
+
+        self.onboard_log = LogConfig(name='Position', period_in_ms=20)
+        self.onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
+        self.onboard_log.add_variable('stateEstimate.x', 'float')
+        self.onboard_log.add_variable('stateEstimate.y', 'float')
+        self.onboard_log.add_variable('stateEstimate.z', 'float')
+        self.cf.log.add_config(self.onboard_log)
+        self.onboard_log.data_received_cb.add_callback(self.onboard_state_cb)
+        self.onboard_log.start()
+
         self.timer = self.create_timer(0.1, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
         
+
+    def onboard_state_cb(self, timestamp, data, logconf):
+        t = self.get_clock().now().nanoseconds / 1e9
+        self.csv_writer.writerow([
+            t, 'onboard', self.sequence.name, data['stabilizer.thrust'],
+            data['stateEstimate.x'], data['stateEstimate.y'], data['stateEstimate.z'], ''
+        ])
+
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
         if self.last_msg_time is not None:
             gap = (now - self.last_msg_time).nanoseconds/1e9
-            if gap > 0.15 and self.sequence != QuadcopterSequence.WAITING_FOR_STATE:
+            if gap > 0.15:
                 self.gap_count += 1
                 self.get_logger().warn(f"Optitrack gap of {gap*1000:.1f}ms since last message (gap count: {self.gap_count})")
             if gap > self.max_gap_seen:
@@ -84,8 +111,10 @@ class HoverTestNode(Node):
         z = msg.position[2]
 
         if z > self.MAX_HEIGHT:
-            self.cf.high_level_commander.stop()
             self.get_logger().warn("Climbed too high, cutting power!")
+            self.cf.high_level_commander.stop()
+            self.cf.commander.send_stop_setpoint()
+            self.emergency_stopped = True
             return
         
         if not self.got_first_state:
@@ -104,19 +133,21 @@ class HoverTestNode(Node):
                 if implied_speed > MAX_POSSIBLE_SPEED:
                     self.rejected_count += 1
                     self.consecutive_rejects += 1
-                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s ({implied_speed:.3f}). \
-                                           Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
+                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
                     if self.consecutive_rejects < 5:
                         return
                     self.get_logger().warn("5 consecutive rejects, treating as real motion and accepting")
                 else:
                     self.consecutive_rejects = 0
 
+
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
         self.last_valid_time = now
         try:
             self.cf.extpos.send_extpos(x, y, z)
+            t = now.nanoseconds / 1e9
+            self.csv_writer.writerow([t, 'extpos_sent', self.sequence.name, '', x, y, z, ''])
         except Exception as e:
             self.get_logger().error(f"Failed to send extpos: {e}")
 
@@ -153,16 +184,9 @@ class HoverTestNode(Node):
     
 
     def step_sequence(self):
-        if self.sequence not in (QuadcopterSequence.DONE, QuadcopterSequence.WAITING_FOR_STATE, QuadcopterSequence.STARTING_ESTIMATOR):
-            if self.last_msg_time is not None:
-                since_last = (self.get_clock().now() - self.last_msg_time).nanoseconds / 1e9
-                if since_last > 0.5:
-                    self.get_logger().error(f"No Optitrack data for {since_last:.2f}s, emergency stopping")
-                    self.cf.high_level_commander.stop()
-                    self.cf.commander.send_stop_setpoint()
-                    self.emergency_stop = True
-                    return
-
+        if self.emergency_stopped:
+            return
+        
         if self.sequence == QuadcopterSequence.WAITING_FOR_STATE:
             if self.got_first_state:
                 self.get_logger().info("Got first state, now resetting estimator")
@@ -202,7 +226,6 @@ class HoverTestNode(Node):
                 self.timer.cancel()
         elif self.sequence == QuadcopterSequence.DONE:
             pass
-        
 
 
 def main():
@@ -219,6 +242,7 @@ def main():
         node.emergency_land()
     finally:
         try:
+            node.log_file.close()
             node.sync_cf.close_link()
         except Exception:
             pass
