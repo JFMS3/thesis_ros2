@@ -17,7 +17,8 @@ from datetime import datetime
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-HOVER_DURATION = 8
+TAKEOFF_DURATION = 2.0
+HOVER_DURATION = 8.0
 LAND_DURATION = 3
 MAX_POSSIBLE_SPEED = 3
 
@@ -51,7 +52,7 @@ class HoverTestNode(Node):
         self.gap_count = 0
         self.emergency_stopped = False
 
-        self.declare_parameter('TARGET_HEIGHT', 0.05)
+        self.declare_parameter('TARGET_HEIGHT', 0.4)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
@@ -67,6 +68,7 @@ class HoverTestNode(Node):
 
         self.cf = self.sync_cf.cf
         self.get_logger().info("Radio link set up")
+        # self.cf.param.set_value('stabilizer.estimator', '2')
 
         now = self.get_clock().now()
         dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
@@ -79,6 +81,9 @@ class HoverTestNode(Node):
         self.onboard_log.add_variable('stateEstimate.x', 'float')
         self.onboard_log.add_variable('stateEstimate.y', 'float')
         self.onboard_log.add_variable('stateEstimate.z', 'float')
+        # self.onboard_log.add_variable('kalman.varPX', 'float')
+        # self.onboard_log.add_variable('kalman.varPY', 'float')
+        # self.onboard_log.add_variable('kalman.varPZ', 'float')
         self.cf.log.add_config(self.onboard_log)
         self.onboard_log.data_received_cb.add_callback(self.onboard_state_cb)
         self.onboard_log.start()
@@ -206,7 +211,10 @@ class HoverTestNode(Node):
         elif self.sequence == QuadcopterSequence.ARMING:
             if self.time_elapsed() > 5:
                 self.get_logger().info("Taking off...")
-                self.cf.high_level_commander.takeoff(self.target_z, HOVER_DURATION)
+                self.cf.high_level_commander.takeoff(
+                    absolute_height_m=self.target_z, 
+                    duration_s=TAKEOFF_DURATION,
+                    yaw=None)
                 self.enter_state(QuadcopterSequence.TAKEOFF)
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > HOVER_DURATION + 0.5:
