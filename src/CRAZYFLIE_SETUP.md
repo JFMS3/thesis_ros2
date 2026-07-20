@@ -116,3 +116,6 @@ Did you crash it? If so, you cannot arm it again until you turn it off and on ag
 
 **It is best to turn the drone off and on after every run!**
 
+<img width="2302" height="2407" alt="PXL_20260720_075754594" src="https://github.com/user-attachments/assets/5243f5c7-a4d9-4582-8371-a0a80fa2fafa" />
+
+
