@@ -14,11 +14,11 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 import csv
 from cflib.crazyflie.log import LogConfig
 from datetime import datetime
+from pathlib import Path
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
 TAKEOFF_DURATION = 2.0
-HOVER_DURATION = 8.0
 LAND_DURATION = 3
 MAX_POSSIBLE_SPEED = 3
 
@@ -56,6 +56,8 @@ class HoverTestNode(Node):
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
+        self.declare_parameter('HOVER_DURATION', 5.0)
+        self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
 
         self.subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
@@ -68,35 +70,64 @@ class HoverTestNode(Node):
 
         self.cf = self.sync_cf.cf
         self.get_logger().info("Radio link set up")
-        # self.cf.param.set_value('stabilizer.estimator', '2')
+        self.cf.param.set_value('stabilizer.estimator', '2')
 
         now = self.get_clock().now()
         dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
-        self.log_file = open(f'hover_test_log_{dt_object.strftime("%H_%M_%S")}.csv', 'w', newline='')
-        self.csv_writer = csv.writer(self.log_file)
-        self.csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'x', 'y', 'z', 'extra'])
+        log_dir_name = f"hover_test_log_{dt_object.strftime("%H_%M")}"
+        pos_log_path = Path(f'log/{log_dir_name}/position.csv')
+        pos_log_path.parent.mkdir(parents=True, exist_ok=True)
+        att_log_path = Path(f'log/{log_dir_name}/attitude.csv')
 
-        self.onboard_log = LogConfig(name='Position', period_in_ms=20)
-        self.onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
-        self.onboard_log.add_variable('stateEstimate.x', 'float')
-        self.onboard_log.add_variable('stateEstimate.y', 'float')
-        self.onboard_log.add_variable('stateEstimate.z', 'float')
-        # self.onboard_log.add_variable('kalman.varPX', 'float')
-        # self.onboard_log.add_variable('kalman.varPY', 'float')
-        # self.onboard_log.add_variable('kalman.varPZ', 'float')
-        self.cf.log.add_config(self.onboard_log)
-        self.onboard_log.data_received_cb.add_callback(self.onboard_state_cb)
-        self.onboard_log.start()
+        self.position_log_file = open(pos_log_path, 'w', newline='')
+        self.position_csv_writer = csv.writer(self.position_log_file)
+        self.position_csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'x', 'y', 'z', 'varX', 'varY', 'varZ', 'extra'])
+        self.position_onboard_log = LogConfig(name='Position', period_in_ms=20)
+        self.position_onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
+        self.position_onboard_log.add_variable('stateEstimate.x', 'float')
+        self.position_onboard_log.add_variable('stateEstimate.y', 'float')
+        self.position_onboard_log.add_variable('stateEstimate.z', 'float')
+        self.position_onboard_log.add_variable('kalman.varX', 'float')
+        self.position_onboard_log.add_variable('kalman.varY', 'float')
+        self.position_onboard_log.add_variable('kalman.varZ', 'float')
+        self.cf.log.add_config(self.position_onboard_log)
+        self.position_onboard_log.data_received_cb.add_callback(self.onboard_position_cb)
+        self.position_onboard_log.start()
+
+        self.attitude_log_file = open(att_log_path, 'w', newline='')
+        self.attitude_csv_writer = csv.writer(self.attitude_log_file)
+        self.attitude_csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'estimatedRoll', 'estimatedPitch', 'estimatedYaw', 'controllerRoll', 'controllerPitch', 'controllerYaw', 'extra'])
+        self.attitude_onboard_log = LogConfig(name='Attitude', period_in_ms=20)
+        self.attitude_onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
+        self.attitude_onboard_log.add_variable('stateEstimate.roll', 'float')
+        self.attitude_onboard_log.add_variable('stateEstimate.pitch', 'float')
+        self.attitude_onboard_log.add_variable('stateEstimate.yaw', 'float')
+        self.attitude_onboard_log.add_variable('controller.roll', 'float')
+        self.attitude_onboard_log.add_variable('controller.pitch', 'float')
+        self.attitude_onboard_log.add_variable('controller.yaw', 'float')
+        self.cf.log.add_config(self.attitude_onboard_log)
+        self.attitude_onboard_log.data_received_cb.add_callback(self.onboard_attitude_cb)
+        self.attitude_onboard_log.start()
+
 
         self.timer = self.create_timer(0.1, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
         
 
-    def onboard_state_cb(self, timestamp, data, logconf):
+    def onboard_position_cb(self, timestamp, data, logconf):
         t = self.get_clock().now().nanoseconds / 1e9
-        self.csv_writer.writerow([
+        self.position_csv_writer.writerow([
             t, 'onboard', self.sequence.name, data['stabilizer.thrust'],
-            data['stateEstimate.x'], data['stateEstimate.y'], data['stateEstimate.z'], ''
+            data['stateEstimate.x'], data['stateEstimate.y'], data['stateEstimate.z'],
+            data['kalman.varX'], data['kalman.varY'], data['kalman.varZ'], ''
+        ])
+
+    def onboard_attitude_cb(self, timestamp, data, logconf):
+        t = self.get_clock().now().nanoseconds / 1e9
+        self.attitude_csv_writer.writerow([
+            t, 'onboard', self.sequence.name, data['stabilizer.thrust'],
+            data['stateEstimate.roll'], data['stateEstimate.pitch'], data['stateEstimate.yaw'],
+            data['controller.roll'], data['controller.pitch'], data['controller.yaw'], ''
         ])
 
 
@@ -152,7 +183,7 @@ class HoverTestNode(Node):
         try:
             self.cf.extpos.send_extpos(x, y, z)
             t = now.nanoseconds / 1e9
-            self.csv_writer.writerow([t, 'extpos_sent', self.sequence.name, '', x, y, z, ''])
+            self.position_csv_writer.writerow([t, 'extpos_sent', self.sequence.name, '', x, y, z, '', '', '', ''])
         except Exception as e:
             self.get_logger().error(f"Failed to send extpos: {e}")
 
@@ -187,6 +218,18 @@ class HoverTestNode(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to emergency land {e}")
     
+    
+    def reset_internal_kalman(self):
+        self.cf.param.set_value('kalman.initialX', str(self.starting_position[0]))
+        self.cf.param.set_value('kalman.initialY', str(self.starting_position[1]))
+        self.cf.param.set_value('kalman.initialZ', str(self.starting_position[2]))
+        self.cf.param.set_value('kalman.initialYaw', '0.0')
+        self.cf.param.set_value('stabilizer.controller', '1')
+        self.get_logger().info("Got first state, now resetting estimator")
+        self.cf.param.set_value('kalman.resetEstimation', '1')
+        time.sleep(0.1)
+        self.cf.param.set_value('kalman.resetEstimation', '0')
+
 
     def step_sequence(self):
         if self.emergency_stopped:
@@ -194,11 +237,7 @@ class HoverTestNode(Node):
         
         if self.sequence == QuadcopterSequence.WAITING_FOR_STATE:
             if self.got_first_state:
-                self.get_logger().info("Got first state, now resetting estimator")
-                self.cf.param.set_value('kalman.resetEstimation', '1')
-                time.sleep(0.05)
-                self.cf.param.set_value('kalman.resetEstimation', '0')
-
+                self.reset_internal_kalman()
                 self.enter_state(QuadcopterSequence.STARTING_ESTIMATOR)
             elif self.time_elapsed() > 30:
                 self.get_logger().error("No quadcopter state received in time, aborting...")
@@ -217,12 +256,12 @@ class HoverTestNode(Node):
                     yaw=None)
                 self.enter_state(QuadcopterSequence.TAKEOFF)
         elif self.sequence == QuadcopterSequence.TAKEOFF:
-            if self.time_elapsed() > HOVER_DURATION + 0.5:
-                self.get_logger().info(f"Beginning hover at {self.target_z}m for {HOVER_DURATION}s")
-                #self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=HOVER_DURATION)
+            if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
+                self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
                 self.enter_state(QuadcopterSequence.HOVERING)
         elif self.sequence == QuadcopterSequence.HOVERING:
-            if self.time_elapsed() > HOVER_DURATION:
+            self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z*2, yaw=0, duration_s=self.HOVER_DURATION)
+            if self.time_elapsed() > self.HOVER_DURATION:
                 self.get_logger().info(f"Landing...")
                 self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)
                 self.enter_state(QuadcopterSequence.LANDING)
@@ -250,7 +289,10 @@ def main():
         node.emergency_land()
     finally:
         try:
-            node.log_file.close()
+            node.position_onboard_log.stop()
+            node.attitude_onboard_log.stop()
+            node.position_log_file.close()
+            node.attitude_log_file.close()
             node.sync_cf.close_link()
         except Exception:
             pass
