@@ -26,7 +26,8 @@ setup(
         'console_scripts': [
             'optitrack_bridge = thesis_optitrack_bridge.optitrack_bridge_node:main',
             'hover_test_node = thesis_optitrack_bridge.hover_test_node:main',
-            'time_constant_classification_node = thesis_optitrack_bridge.time_constant_classification_node:main'
+            'time_constant_classification_node = thesis_optitrack_bridge.time_constant_classification_node:main',
+            'drag_classification_node = thesis_optitrack_bridge.drag_classification_node:main'
         ],
     },
 )
