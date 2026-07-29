@@ -74,17 +74,17 @@ class DragClassificationNode(Node):
         self.declare_parameter('IMPULSE_DURATION', 0.3)
 
         self.IMPULSE_DURATION = float(self.get_parameter('IMPULSE_DURATION').value)
-        self.declare_parameter('IMPULSE_ROLL_DEG', 15.0)
+        self.declare_parameter('IMPULSE_ROLL_DEG', 0.0)
         self.IMPULSE_ROLL_DEG = float(self.get_parameter('IMPULSE_ROLL_DEG').value)
-        self.declare_parameter('IMPULSE_PITCH_DEG', 0.0)
+        self.declare_parameter('IMPULSE_PITCH_DEG', 15.0)
         self.IMPULSE_PITCH_DEG = float(self.get_parameter('IMPULSE_PITCH_DEG').value)
-        self.declare_parameter('COAST_DURATION', 1.5)
+        self.declare_parameter('COAST_DURATION', 3.0)
         self.COAST_DURATION = float(self.get_parameter('COAST_DURATION').value)
         assert abs(self.IMPULSE_ROLL_DEG) <= MAX_IMPULSE_DEG
         assert abs(self.IMPULSE_PITCH_DEG) <= MAX_IMPULSE_DEG
         
         
-        self.LOG_FILENAME = f"log/drag_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        self.LOG_FILENAME = f"log/drag_classification/vx/drag_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 
         cflib.crtp.init_drivers()
         self.get_logger().info("Connecting to CrazyFlie...")
@@ -106,6 +106,9 @@ class DragClassificationNode(Node):
         log_conf.add_variable('stateEstimate.vx', 'float')
         log_conf.add_variable('stateEstimate.vy', 'float')
         log_conf.add_variable('stateEstimate.vz', 'float')
+        log_conf.add_variable('stateEstimate.roll', 'float')
+        log_conf.add_variable('stateEstimate.pitch', 'float')
+        log_conf.add_variable('stateEstimate.yaw', 'float')
         self.cf.log.add_config(log_conf)
         log_conf.data_received_cb.add_callback(self._velocity_log_callback)
         log_conf.start()
@@ -119,6 +122,9 @@ class DragClassificationNode(Node):
             'vx': data['stateEstimate.vx'],
             'vy': data['stateEstimate.vy'],
             'vz': data['stateEstimate.vz'],
+            'roll': data['stateEstimate.roll'],
+            'pitch': data['stateEstimate.pitch'],
+            'yaw': data['stateEstimate.yaw'],
         })
 
     def _write_log_csv(self):

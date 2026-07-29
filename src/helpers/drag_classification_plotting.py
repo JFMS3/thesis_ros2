@@ -6,12 +6,13 @@ import numpy as np
 import os
 
 
-def exponential_decay(t, v0, A):
-    return v0 * np.exp(-A * t)
+def exponential_decay(t, v0, A, v_inf):
+    return (v0 - v_inf) * np.exp(-A * t) + v_inf
 
 
 def find_decay_start(v):
     return int(np.argmax(np.abs(v)))
+
 
 
 def weighted_average(values, stderrs):
@@ -42,8 +43,8 @@ def plot_fit(csv_path, result, axis):
 def main():
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parents[1]
-    classification_dir = project_root / "log" / "drag_classification"
     axis = 'vx'
+    classification_dir = project_root / "log" / "drag_classification"/ axis
     results = []
 
     for csv_path in classification_dir.glob("*.csv"):
@@ -62,13 +63,13 @@ def main():
 
         v0_guess = v[0]
         A_guess = 1.0
-
+        v_inf_guess = v[-5:].mean()
         popt, pcov = curve_fit(
             exponential_decay, t, v,
-            p0=[v0_guess, A_guess],
+            p0=[v0_guess, A_guess, v_inf_guess],
             maxfev=5000
         )
-        v0, A = popt
+        v0, A, v_inf = popt
         perr = np.sqrt(np.diag(pcov))
 
         v_pred = exponential_decay(t, *popt)

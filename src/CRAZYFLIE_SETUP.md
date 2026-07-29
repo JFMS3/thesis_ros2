@@ -107,7 +107,23 @@ Press the green *ARM* button to warm up the motors.
 https://github.com/user-attachments/assets/9bd1d93d-4ea2-409d-bf09-81a706965427
 
 
+## Automatic Control
+```
+usbipd list
+usbipd bind --busid <BUS_ID> (in powershell admin)
+usbipd attach --wsl --busid <BUS_ID>
 
+(In WSL)
+lsusb
+sudo chmod 666 /dev/bus/usb/001/<Device ID from lsusb>
+
+colcon build --packages-select thesis_optitrack_bridge
+source install/setup.bash
+ros2 run thesis_optitrack_bridge hover_test_node
+
+(when done)
+usbipd detach --busid <BUS_ID>
+```
 
 # Troubleshooting
 
