@@ -19,8 +19,8 @@ class OptitrackBridgeNode(Node):
         self.drone_id = self.get_parameter('drone_body_id').value
         self.platform_id = self.get_parameter('platform_body_id').value
 
-        self.declare_parameter('server_address', '192.168.4.105')
-        self.declare_parameter('client_address', '192.168.4.105')
+        self.declare_parameter('server_address', '192.168.1.50')
+        self.declare_parameter('client_address', '192.168.1.50')
         self.declare_parameter('use_multicast', False)
         self.server_address = self.get_parameter('server_address').value
         self.client_address = self.get_parameter('client_address').value
