@@ -51,3 +51,13 @@ class FrameTransformer:
             w1*z2 + x1*y2 - y1*x2 + z1*w2,
             w1*w2 - x1*x2 - y1*y2 - z1*z2
         ])
+
+    def average_quats(self, quats):
+        quats = np.asarray(quats, dtype=float)
+        reference = quats[0]
+        for i in range(1, len(quats)):
+            if np.dot(quats[i], reference) < 0:
+                quats[i] = -quats[i]
+
+        average_quat = np.mean(quats, axis=0)
+        return self.normalise_quat(average_quat)

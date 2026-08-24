@@ -29,7 +29,10 @@ class OptitrackBridgeNode(Node):
         self.drone_publisher = self.create_publisher(QuadcopterState, 'measured_quadcopter_state', qos)
         self.platform_publisher = self.create_publisher(PlatformState, 'measured_platform_state', qos)
 
-        self.level_plane = None # ground plane not perfectly flat in Motive
+        self.initial_drone_readings = [] # averaged to create level plane
+        self.initial_platform_readings = []
+        self.drone_level_plane = None # ground plane not perfectly flat in Motive
+        self.platform_level_plane = None
         self.transformer = FrameTransformer()
         self.get_logger().info("Optitrack bridge node has begun!")
 
@@ -57,12 +60,15 @@ class OptitrackBridgeNode(Node):
     
     def publish_drone(self, position, rotation):
         q_now = self.transformer.normalise_quat(rotation)
-        if self.level_plane is None:
-            self.level_plane = q_now.copy()
+        if self.drone_level_plane is None:
+            self.initial_drone_readings.append(q_now)
+            if len(self.initial_drone_readings) >= 10:
+                self.drone_level_plane = self.transformer.average_quats(self.initial_drone_readings)
+            return
 
         q_relative = self.transformer.quat_multiply(
             q_now,
-            self.transformer.quat_conjugate(self.level_plane)
+            self.transformer.quat_conjugate(self.drone_level_plane)
         )
 
         q = Quaternion()
@@ -84,6 +90,23 @@ class OptitrackBridgeNode(Node):
 
 
     def publish_platform(self, position, rotation):
+        q_now = self.transformer.normalise_quat(rotation)
+        if self.platform_level_plane is None:
+            self.initial_platform_readings.append(q_now)
+            if len(self.initial_platform_readings) >= 10:
+                self.platform_level_plane = self.transformer.average_quats(self.initial_platform_readings)
+            return
+
+        q_relative = self.transformer.quat_multiply(
+            q_now,
+            self.transformer.quat_conjugate(self.platform_level_plane)
+        )
+
+        q = Quaternion()
+        q.x, q.y, q.z, q.w = q_relative
+        phi, theta, _ = self.transformer.quat_to_euler(q)
+        _, _, psi = self.transformer.quat_to_euler(q_now)
+
         platform_msg = PlatformState()
         platform_msg.header.stamp = self.get_clock().now().to_msg()
         platform_msg.header.frame_id = 'WORLD'
@@ -92,7 +115,7 @@ class OptitrackBridgeNode(Node):
             float(position[1]),
             float(position[2])
         ]
-        platform_msg.velocity = [0.0, 0.0, 0.0]
+        platform_msg.attitude = [phi, theta, psi]
         self.platform_publisher.publish(platform_msg)
 
 
