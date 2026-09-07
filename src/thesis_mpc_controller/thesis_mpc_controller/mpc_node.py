@@ -74,7 +74,7 @@ class MPCNode(Node):
 
     def control_loop(self):
         if self.platform_state is None or self.x_hat is None: 
-            self.get_logger.warn(
+            self.get_logger().warn(
                 "Waiting for state estimate and platform state", 
                 throttle_duration_sec=2
             )

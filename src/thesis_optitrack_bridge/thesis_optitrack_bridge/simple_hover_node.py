@@ -33,9 +33,9 @@ class QuadcopterSequence(Enum):
     DONE = auto()
 
 
-class HoverTestNode(Node):
+class SimpleHoverNode(Node):
     def __init__(self):
-        super().__init__('hover_test_node')
+        super().__init__('simple_hover_node')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
         self.got_first_state = False
@@ -56,10 +56,8 @@ class HoverTestNode(Node):
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
-        self.declare_parameter('HOVER_DURATION', 5.0)
+        self.declare_parameter('HOVER_DURATION', 30.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
-        self.declare_parameter('FLY_DURATION', 10.0)
-        self.FLY_DURATION = float(self.get_parameter('FLY_DURATION').value)
 
         self.subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
@@ -76,7 +74,7 @@ class HoverTestNode(Node):
 
         now = self.get_clock().now()
         dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
-        log_dir_name = f"hover_test_log_{dt_object.strftime("%H_%M")}"
+        log_dir_name = f"sigma_accel_classification_{dt_object.strftime("%H_%M")}"
         pos_log_path = Path(f'log/{log_dir_name}/position.csv')
         pos_log_path.parent.mkdir(parents=True, exist_ok=True)
         att_log_path = Path(f'log/{log_dir_name}/attitude.csv')
@@ -271,37 +269,11 @@ class HoverTestNode(Node):
 
         elif self.sequence == QuadcopterSequence.HOVERING:
             if not self._hover_commanded:
-                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.HOVER_DURATION/2)
+                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.HOVER_DURATION)
                 self._hover_commanded = True
             if self.time_elapsed() > self.HOVER_DURATION:
                 self.get_logger().info(f"Beginning flight process...")
-                self.enter_state(QuadcopterSequence.FLYING)
-
-        elif self.sequence == QuadcopterSequence.FLYING:
-            t = self.time_elapsed()
-            if t < self.FLY_DURATION / 3:
-                if not self._forward_commanded:
-                    self.get_logger().info(f"Flying 1m forward...")
-                    self.cf.high_level_commander.go_to(x=self.starting_position[0] + 1, y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLY_DURATION/4)
-                    self._forward_commanded = True
-            elif t <= 2/3 * self.FLY_DURATION:
-                if not self._return_commanded:
-                    self.get_logger().info(f"Returing to initial hover...")
-                    self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLY_DURATION/4)
-                    self._return_commanded = True
-            else:
-                current_x, current_y = self.last_valid_pos[0], self.last_valid_pos[1]
-                starting_x, starting_y = self.starting_position[0], self.starting_position[1]
-                position_error = sqrt((current_x - starting_x)**2 + (current_y - starting_y)**2)
-                if position_error >= 0.2:
-                    if t >= self._next_retry_allowed_t:
-                        self.get_logger().info(f"Reattempting return, position error too large: {position_error:.3f}")
-                        self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLY_DURATION/4)
-                        self._next_retry_allowed_t = t + self.FLY_DURATION / 4
-                else:
-                    self.get_logger().info(f"Landing...")
-                    self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)
-                    self.enter_state(QuadcopterSequence.LANDING)
+                self.enter_state(QuadcopterSequence.LANDING)
 
         elif self.sequence == QuadcopterSequence.LANDING:
             if self.time_elapsed() > LAND_DURATION + 0.5:
@@ -315,7 +287,7 @@ class HoverTestNode(Node):
 
 def main():
     rclpy.init()
-    node = HoverTestNode()
+    node = SimpleHoverNode()
 
     try:
         rclpy.spin(node)

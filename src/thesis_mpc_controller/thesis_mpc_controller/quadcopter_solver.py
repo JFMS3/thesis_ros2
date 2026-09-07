@@ -35,7 +35,7 @@ def setup_ocp_solver(x0, N_horizon, Tf, Ax, Ay, Az, tau_phi, tau_theta, m):
     # constraints
     phi_max = np.deg2rad(15)
     theta_max = np.deg2rad(15)
-    Tdev_max = 10.0
+    Tdev_max = 0.9
 
     ocp.constraints.idxbu = np.array([0, 1, 2])
     ocp.constraints.lbu = np.array([-phi_max, -theta_max, -Tdev_max])
