@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand
-from .kalman_filter import Observer
+from .kalman_filter import PositionVelocityKalmanFilter
 from .quadcopter_solver import setup_ocp_solver
 import numpy as np
 
@@ -45,7 +45,7 @@ class MPCNode(Node):
 
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
-            '/quadcopter_state',
+            '/full_quadcopter_state',
             self.quadcopter_callback,
             qos
         )

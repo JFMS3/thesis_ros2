@@ -1,18 +1,18 @@
 /kalman_filter:
-  ros__parameters:
+  ros_parameters:
     R_pos_diag: [4.21157110e-11, 9.82080281e-10, 1.58729592e-10]
     R_att_diag: [3.21244190e-08, 2.73910098e-08]
     sigma_accel: [0.5, 0.5, 0.3]
-    P_pos_init: 1e-3
+    P_pos_init: 0.001
     P_vel_init: 0.1
     nis_threshold: 11.34
     max_dt: 0.1
 
 /mpc_solver:
-  ros__parameters:
+  ros_parameters:
     A_x: 0.6
     A_y: 0.6
     A_z: 0.6
-    tau_phi: 1.0
-    tau_theta: 1.0
+    tau_phi: 94.6e-4
+    tau_theta: 94.6e-4
     m: 40e-3 # mass of CrazyFlie [kg]

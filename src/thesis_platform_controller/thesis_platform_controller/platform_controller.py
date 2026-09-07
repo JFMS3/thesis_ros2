@@ -19,24 +19,19 @@ class PlatformController(Node):
         self.radius = 0.8
         self.linear_speed = 0.1
         self.omega = self.linear_speed / self.radius
+
+        # actuator limits
         self.MAX_V = 0.3
         self.MAX_W = 1.9
-        self.ENTER_THRESH = math.radians(90)
-        self.EXIT_THRESH = math.radians(20)
+
+        self.correction_gain = 0.05
+        self.max_correction = 0.03
         self.YAW_JUMP_LIMIT = math.radians(90)
 
         self.pose = None
         self.start_time = None
         self.stale_count = 0
-        self.reorienting = False
         self.get_logger().info("Platform Controller node has begun!")
-
-        # using Kanayama trajectory tracking law which uses feedforward correction
-        self.kx, self.kyaw = 0.5, 0.5
-        zeta = 1.0
-        omega_n = self.kx / (2*zeta)
-        self.ky = (omega_n**2 - self.omega**2) / self.linear_speed
-        self.get_logger().info(f"Gain values: kx={self.kx}, ky={self.ky}, kz={self.kyaw}")
         
 
     def state_callback(self, msg: PlatformState):
@@ -86,12 +81,6 @@ class PlatformController(Node):
         theta_ref = self.omega * t
 
         cx, cy = self.centre
-        theta_actual = math.atan2(y-cy, x-cx)
-        theta_gap = math.atan2(math.sin(theta_ref-theta_actual), math.cos(theta_ref-theta_actual))
-        MAX_GAP = math.radians(30)
-        if theta_gap > MAX_GAP: # cap the max gap between ref and actual to avoid overlapping
-            theta_ref = theta_actual + MAX_GAP
-
         ref_x = cx + self.radius * math.cos(theta_ref)
         ref_y = cy + self.radius * math.sin(theta_ref)
         ref_yaw = theta_ref + math.pi/2 + self.yaw_offset
@@ -103,20 +92,9 @@ class PlatformController(Node):
         ex = math.cos(yaw) * dx + math.sin(yaw) * dy
         ey = -math.sin(yaw) * dx + math.cos(yaw) * dy
 
-        if not self.reorienting and abs(dyaw) > self.ENTER_THRESH:
-            self.reorienting = True
-        elif self.reorienting and abs(dyaw) < self.EXIT_THRESH:
-            self.reorienting = False
-
-        if self.reorienting:
-            v = 0.0
-            w = max(-self.MAX_W, min(self.MAX_W, 1.0*dyaw))
-        else:    
-            v_unclamped = self.linear_speed * math.cos(dyaw) + self.kx*ex
-            v = max(0, min(self.MAX_V, v_unclamped))
-            omega_feedforward = max(self.omega, v / self.radius)
-            w = omega_feedforward + self.linear_speed * (self.ky*ey + self.kyaw * math.sin(dyaw))
-            w = max(-self.MAX_W, min(self.MAX_W, w))
+        correction = max(-self.max_correction, min(self.max_correction, self.correction_gain * ey))
+        v = max(-self.MAX_V, min(self.MAX_V, self.linear_speed))
+        w = max(-self.MAX_W, min(self.MAX_W, self.omega + correction))
 
         cmd = TwistStamped()
         cmd.header.stamp = now.to_msg()
