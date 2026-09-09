@@ -3,23 +3,34 @@ from rclpy.node import Node
 from std_msgs.msg import Float64
 from thesis_interfaces.msg import QuadcopterState
 from .kalman_filter import PositionVelocityKalmanFilter
+import os
+import yaml
 
 class KalmanFilterNode(Node):
     """Subscribes to quadcopter_state topic, publishes velocity estimates"""
     def __init__(self):
         super().__init__('kalman_filter_node')
-        self.declare_parameter('R_pos_diag', [1.0e-5, 1.0e-5, 1.0e-5])
-        self.declare_parameter('sigma_accel', [0.5, 0.5, 0.3])
-        self.declare_parameter('P_pos_init', 1.0e-3)
-        self.declare_parameter('P_vel_init', 1.0)
+        
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        yaml_path = os.path.abspath(os.path.join(current_dir, '..', "thesis_mpc_controller", "config", "matrix_params.yaml"))
+        with open(yaml_path, 'r') as f:
+            params = yaml.safe_load(f)
+            kf_params = params.get("/kalman_filter").get('ros_parameters')
+            mpc_params = params.get("/mpc_solver").get('ros_parameters')
+
+        R_pos_diag = [float(v) for v in kf_params.get('R_pos_diag')]
+        sigma_accel = [float(v) for v in kf_params.get('sigma_accel')]
+        P_pos_init = float(kf_params.get('P_pos_init'))
+        P_vel_init = float(kf_params.get('P_vel_init'))
+
         self.declare_parameter('nis_threshold', 11.34)
         self.declare_parameter('max_dt', 0.1)
 
         self.kf = PositionVelocityKalmanFilter(
-            self.get_parameter('R_pos_diag').value,
-            self.get_parameter('sigma_accel').value,
-            self.get_parameter('P_pos_init').value,
-            self.get_parameter('P_vel_init').value
+            R_pos_diag,
+            sigma_accel,
+            P_pos_init,
+            P_vel_init
         )
         self.nis_threshold = self.get_parameter('nis_threshold').value
         self.max_dt = self.get_parameter('max_dt').value
