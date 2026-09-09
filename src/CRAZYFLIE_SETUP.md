@@ -115,7 +115,7 @@ usbipd attach --wsl --busid <BUS_ID>
 
 (In WSL)
 lsusb
-sudo chmod 666 /dev/bus/usb/001/<Device ID from lsusb>
+sudo chmod 666 /dev/bus/usb/001/<Device num from lsusb>
 
 colcon build --packages-select thesis_optitrack_bridge
 source install/setup.bash

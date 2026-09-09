@@ -51,6 +51,7 @@ class SimpleHoverNode(Node):
         self.gap_count = 0
         self.emergency_stopped = False
         self._hover_commanded = False
+        self.rejected_count = 0
 
         self.declare_parameter('TARGET_HEIGHT', 0.4)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
@@ -265,14 +266,17 @@ class SimpleHoverNode(Node):
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
                 self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
-                self.enter_state(QuadcopterSequence.HOVERING)
+                if not self._hover_commanded:
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
+                    self._hover_commanded = True
+                if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
+                    self.get_logger().info(f"Just chilling for {self.HOVER_DURATION}s now")
+                    self.enter_state(QuadcopterSequence.HOVERING)
 
         elif self.sequence == QuadcopterSequence.HOVERING:
-            if not self._hover_commanded:
-                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.HOVER_DURATION)
-                self._hover_commanded = True
             if self.time_elapsed() > self.HOVER_DURATION:
-                self.get_logger().info(f"Beginning flight process...")
+                self.get_logger().info(f"Landing...")
+                self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)
                 self.enter_state(QuadcopterSequence.LANDING)
 
         elif self.sequence == QuadcopterSequence.LANDING:
