@@ -1,0 +1,9 @@
+/platform_kalman_filter:
+  ros_parameters:
+    R_pos_diag: [4.21157110e-11, 9.82080281e-10, 1.58729592e-10]
+    R_att_diag: [3.21244190e-08, 2.73910098e-08]
+    sigma_accel: [0.2, 0.2, 0.2]
+    P_pos_init: 0.001
+    P_vel_init: 0.1
+    nis_threshold: 11.34
+    max_dt: 0.1

@@ -144,7 +144,7 @@ ocp_cython_o: ocp_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /usr/lib/python3/dist-packages/numpy/core/include \
+	-I /home/jfms3/ros2_ws/ros_env/lib/python3.12/site-packages/numpy/_core/include \
 	-I /usr/include/python3.12 \
 	acados_ocp_solver_pyx.c \
 
@@ -173,7 +173,7 @@ sim_cython_o: sim_cython_c
 	-I $(INCLUDE_PATH)/blasfeo/include/ \
 	-I $(INCLUDE_PATH)/hpipm/include/ \
 	-I $(INCLUDE_PATH) \
-	-I /usr/lib/python3/dist-packages/numpy/core/include \
+	-I /home/jfms3/ros2_ws/ros_env/lib/python3.12/site-packages/numpy/_core/include \
 	-I /usr/include/python3.12 \
 	acados_sim_solver_pyx.c \
 

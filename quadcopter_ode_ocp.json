@@ -21,7 +21,7 @@
         },
         "code_export_directory": "/home/jfms3/ros2_ws/c_generated_code_quad_sim",
         "cython_include_dirs": [
-            "/usr/lib/python3/dist-packages/numpy/core/include",
+            "/home/jfms3/ros2_ws/ros_env/lib/python3.12/site-packages/numpy/_core/include",
             "/usr/include/python3.12"
         ],
         "ext_fun_compile_flags": "-O2",
@@ -51,7 +51,7 @@
         "quadcopter_ode_model/quadcopter_ode_expl_vde_forw.c",
         "quadcopter_ode_model/quadcopter_ode_expl_vde_adj.c"
     ],
-    "hash": "246e6ade02340adb0085f637907b2dc7",
+    "hash": "5afd5b7c9bd42a8514b080f970a33acb",
     "model": {
         "con_h_expr": [],
         "con_h_expr_0": [],

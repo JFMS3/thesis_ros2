@@ -84,6 +84,7 @@ class PlatformController(Node):
         arr = np.array(self.refit_points, dtype=float)
         ts, xs, ys = arr[:, 0], arr[:, 1], arr[:, 2]
 
+        # fits cx, cy and radius to measured x, y via linear least squares (just expanding (x-cx)^2+(y-cy)^2=r^2)
         A = np.c_[2 * xs, 2 * ys, np.ones(len(xs))]
         (cx, cy, c), *_ = np.linalg.lstsq(A, xs ** 2 + ys ** 2, rcond=None)
         r = math.sqrt(max(c + cx * cx + cy * cy, 1e-9))
