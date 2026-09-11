@@ -5,6 +5,7 @@ from thesis_interfaces.msg import QuadcopterState
 from .kalman_filter import PositionVelocityKalmanFilter
 import os
 import yaml
+import numpy as np
 
 class KalmanFilterNode(Node):
     """Subscribes to quadcopter_state topic, publishes velocity estimates"""
@@ -17,23 +18,24 @@ class KalmanFilterNode(Node):
             params = yaml.safe_load(f)
             kf_params = params.get("/kalman_filter").get('ros_parameters')
             mpc_params = params.get("/mpc_solver").get('ros_parameters')
-
-        R_pos_diag = [float(v) for v in kf_params.get('R_pos_diag')]
-        sigma_accel = [float(v) for v in kf_params.get('sigma_accel')]
-        P_pos_init = float(kf_params.get('P_pos_init'))
-        P_vel_init = float(kf_params.get('P_vel_init'))
-
         self.declare_parameter('nis_threshold', 11.34)
         self.declare_parameter('max_dt', 0.1)
 
-        self.kf = PositionVelocityKalmanFilter(
-            R_pos_diag,
-            sigma_accel,
-            P_pos_init,
-            P_vel_init
-        )
+        R_pos = np.array(kf_params.get('R_pos')).reshape(3, 3)
+        sigma_accel = [float(v) for v in kf_params.get('sigma_accel')]
+        P_pos_init = float(kf_params.get('P_pos_init'))
+        P_vel_init = float(kf_params.get('P_vel_init'))
         self.nis_threshold = self.get_parameter('nis_threshold').value
         self.max_dt = self.get_parameter('max_dt').value
+
+
+        self.kf = PositionVelocityKalmanFilter(
+            R_pos,
+            sigma_accel,
+            P_pos_init,
+            P_vel_init,
+            self.max_dt
+        )
         self.prev_stamp = None
 
         self.create_subscription(QuadcopterState, '/measured_quadcopter_state', self.on_measurement, 10)

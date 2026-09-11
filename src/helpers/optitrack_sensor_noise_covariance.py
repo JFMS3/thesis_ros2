@@ -1,40 +1,58 @@
 import numpy as np
 from pathlib import Path
 import re
-from thesis_optitrack_bridge.frame_transformer import FrameTransformer
+import os
+from matplotlib import pyplot as plt
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+logpath = os.path.abspath(os.path.join(current_dir, '..', "..", "log", "quadcopter_position_stationary_logging.txt"))
 
-logpath = Path.home() / ".ros" / "log" / "python3_8571_1782280280689.log"
-pattern = r"position \((.*?)\) and rotation \((.*?)\)"
+pattern = r"^([+-]?\d+\.\d+), ([+-]?\d+\.\d+), ([+-]?\d+\.\d+)$"
 position_list = []
-rotation_list = []
-euler_list = []
-transformer = FrameTransformer()
 
 with open(logpath, 'r') as file:
-    for line in file:
-        match = re.search(pattern, line.strip())
-
-        if match:
-            position_string, rotation_string = match.groups()
-            position = list(map(float, position_string.split(", ")))
-            rotation = list(map(float, rotation_string.split(", ")))
-
-            q = transformer.normalise_quat(rotation)
-            phi, theta, _ = transformer.quat_to_euler(q)
-            position_list.append(position)
-            rotation_list.append(rotation)
-            euler_list.append([phi, theta])
+    matched_groups = re.findall(pattern, file.read(), re.MULTILINE)
+    all_positions = [[float(num) for num in group] for group in matched_groups]
 
 
-position_data = np.array(position_list)
-rotation_data = np.array(rotation_list)
-euler_data = np.array(euler_list)
+position_data = np.array(all_positions)
+cov_matrix = np.cov(position_data, rowvar=False)
+cov_xy = cov_matrix[0, 1]
+cov_xz = cov_matrix[0, 2]
+cov_yz = cov_matrix[1, 2]
 
-position_variance = np.var(position_data, axis=0, ddof=1)
-rotation_variance = np.var(rotation_data, axis=0, ddof=1)
-euler_variance = np.var(euler_data, axis=0, ddof=1)
+print(cov_matrix)
 
-print(position_variance)
-print(rotation_variance)
-print(euler_variance)
+eigvals, eigvecs = np.linalg.eigh(cov_matrix)
+print(eigvals, eigvals.max() / eigvals.min())
+
+plt.figure()
+plt.plot(position_data[:, 0], label='x')
+plt.plot(position_data[:, 1], label='y')
+plt.plot(position_data[:, 2], label='z')
+plt.legend()
+plt.savefig("quad_position_trace")
+plt.close()
+z = (position_data - position_data.mean(0)) / position_data.std(0)
+print(np.abs(z).max())
+
+
+'''
+Platform covariance
+[[ 8.22292703e-07 -1.25930039e-07 -3.41836164e-08]
+ [-1.25930039e-07  1.06470785e-07  3.35939481e-08]
+ [-3.41836164e-08  3.35939481e-08  1.71409207e-07]]
+'''
+
+'''
+Quadcopter position covariance
+[[4.05334208e-09 4.08163319e-09 5.91631335e-09]
+ [4.08163319e-09 5.55542538e-09 5.95189493e-09]
+ [5.91631335e-09 5.95189493e-09 8.73493455e-09]]
+'''
+
+'''
+Quadcopter attitude covariance
+[[ 1.93045004e-06 -8.30303711e-06]
+ [-8.30303711e-06  5.02677355e-05]]
+'''

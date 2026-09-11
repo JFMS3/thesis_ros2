@@ -11,13 +11,14 @@ class PositionVelocityKalmanFilter:
         P_pos_init: initial position state covariance (how much initial position is trusted)
         P_vel_init: initial velocity state covariance (how much initial velocity is trusted)
     """
-    def __init__(self, R_pos_diag, sigma_accel, P_pos_init, P_vel_init):
+    def __init__(self, R_pos_diag, sigma_accel, P_pos_init, P_vel_init, max_dt=0.1):
         self.sigma_accel = np.asarray(sigma_accel, float)
         self.kf = KalmanFilter(dim_x=6, dim_z=3)
         self.kf.R = np.diag(R_pos_diag)
         self.kf.P = np.diag([P_pos_init] * 3 + [P_vel_init] * 3)
         self.initialised = False
         self.kf.H = np.zeros((3, 6))
+        self.max_dt = max_dt
         for i in range(3):
             self.kf.H[i, i] = 1.0 # i.e. only positions are known
 
@@ -28,6 +29,7 @@ class PositionVelocityKalmanFilter:
 
 
     def predict(self, dt):
+        dt = min(dt, self.max_dt)
         Q = np.zeros((6, 6))
         F = np.eye(6)
         for i in range(3):

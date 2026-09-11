@@ -5,6 +5,7 @@ from thesis_interfaces.msg import PlatformState
 from thesis_mpc_controller.thesis_mpc_controller.kalman_filter import PositionVelocityKalmanFilter
 import os
 import yaml
+import numpy as np
 
 class PlatformKalmanFilterNode(Node):
     """Subscribes to platform topic, publishes velocity estimates"""
@@ -17,19 +18,21 @@ class PlatformKalmanFilterNode(Node):
             params = yaml.safe_load(f)
             kf_params = params.get("/platform_kalman_filter").get('ros_parameters')
 
-        R_pos_diag = [float(v) for v in kf_params.get('R_pos_diag')]
+        R_pos = np.array(kf_params.get('R_pos')).reshape(3, 3)
         sigma_accel = [float(v) for v in kf_params.get('sigma_accel')]
         P_pos_init = float(kf_params.get('P_pos_init'))
         P_vel_init = float(kf_params.get('P_vel_init'))
 
         self.declare_parameter('nis_threshold', 11.34)
         self.declare_parameter('max_dt', 0.1)
+        self.max_dt = self.get_parameter('max_dt').value
 
         self.kf = PositionVelocityKalmanFilter(
-            R_pos_diag,
+            R_pos,
             sigma_accel,
             P_pos_init,
-            P_vel_init
+            P_vel_init,
+            self.max_dt
         )
         self.nis_threshold = self.get_parameter('nis_threshold').value
         self.max_dt = self.get_parameter('max_dt').value
