@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
 from thesis_interfaces.msg import PlatformState
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from thesis_mpc_controller.thesis_mpc_controller.kalman_filter import PositionVelocityKalmanFilter
 import os
 import yaml
@@ -11,6 +12,7 @@ class PlatformKalmanFilterNode(Node):
     """Subscribes to platform topic, publishes velocity estimates"""
     def __init__(self):
         super().__init__('platform_kalman_filter_node')
+        state_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         yaml_path = os.path.abspath(os.path.join(current_dir, "config", "matrix_params.yaml"))
@@ -18,7 +20,7 @@ class PlatformKalmanFilterNode(Node):
             params = yaml.safe_load(f)
             kf_params = params.get("/platform_kalman_filter").get('ros_parameters')
 
-        R_pos = np.array(kf_params.get('R_pos')).reshape(3, 3)
+        R_pos = np.array(kf_params.get('R_pos'), dtype=float).reshape(3, 3)
         sigma_accel = [float(v) for v in kf_params.get('sigma_accel')]
         P_pos_init = float(kf_params.get('P_pos_init'))
         P_vel_init = float(kf_params.get('P_vel_init'))
@@ -35,10 +37,9 @@ class PlatformKalmanFilterNode(Node):
             self.max_dt
         )
         self.nis_threshold = self.get_parameter('nis_threshold').value
-        self.max_dt = self.get_parameter('max_dt').value
         self.prev_stamp = None
 
-        self.create_subscription(PlatformState, '/measured_platform_state', self.on_measurement, 10)
+        self.create_subscription(PlatformState, '/measured_platform_state', self.on_measurement, state_qos)
         self.pub = self.create_publisher(PlatformState, '/full_platform_state', 10)
         self.nis_pub = self.create_publisher(Float64, '/observed_nis', 10)
 

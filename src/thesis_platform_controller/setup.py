@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'platform_controller = thesis_platform_controller.platform_controller:main',
+            'platform_kf = thesis_platform_controller.platform_kalman_filter:main',
         ],
     },
 )

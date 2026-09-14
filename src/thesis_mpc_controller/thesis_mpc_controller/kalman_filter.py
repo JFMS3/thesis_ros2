@@ -11,10 +11,10 @@ class PositionVelocityKalmanFilter:
         P_pos_init: initial position state covariance (how much initial position is trusted)
         P_vel_init: initial velocity state covariance (how much initial velocity is trusted)
     """
-    def __init__(self, R_pos_diag, sigma_accel, P_pos_init, P_vel_init, max_dt=0.1):
+    def __init__(self, R_pos, sigma_accel, P_pos_init, P_vel_init, max_dt=0.1):
         self.sigma_accel = np.asarray(sigma_accel, float)
         self.kf = KalmanFilter(dim_x=6, dim_z=3)
-        self.kf.R = np.diag(R_pos_diag)
+        self.kf.R = np.asarray(R_pos, dtype=float)
         self.kf.P = np.diag([P_pos_init] * 3 + [P_vel_init] * 3)
         self.initialised = False
         self.kf.H = np.zeros((3, 6))
@@ -51,8 +51,8 @@ class PositionVelocityKalmanFilter:
         innovation_covariance = self.kf.H @ self.kf.P @ self.kf.H.T + self.kf.R
         nis = float(innovation @ np.linalg.solve(innovation_covariance, innovation))
 
-        if nis_threshold is not None and nis > nis_threshold:
-            return nis, False
+        # if nis_threshold is not None and nis > nis_threshold:
+        #     return nis, False
         self.kf.update(pos_measured)
         return nis, True
     
