@@ -7,14 +7,6 @@ from .quadcopter_solver import setup_ocp_solver
 import numpy as np
 
 
-def generate_platform_preview(px, py, N_horizon, nx, z_hover=2.0):
-    ref = np.zeros(nx)
-    ref[0] = px
-    ref[1] = py
-    ref[2] = z_hover
-    return np.tile(ref, (N_horizon + 1, 1))
-
-
 class MPCNode(Node):
     def __init__(self):
         super().__init__('mpc_node')
@@ -39,20 +31,25 @@ class MPCNode(Node):
         self.nx = self.ocp.dims.nx
         self.nu = self.ocp.dims.nu
         self.x_hat = None
-        self.platform_state = None
+        self.platform_pos = None
+        self.platform_vel = None
         self.mode = ControllerMode.TRACKING_MODE
         self.timer = self.create_timer(self.h, self.control_loop)
 
+        self.TRACK_HEIGHT = 1.0 # just make drone hover 1m above platform for now
+        self.prev_drone_pos = None # for now not using drone kalman filter
+        self.prev_drone_stamp = None
+
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
-            '/full_quadcopter_state',
+            '/measured_quadcopter_state',
             self.quadcopter_callback,
             qos
         )
     
         self.platform_subscription = self.create_subscription(
             PlatformState,
-            '/platform_state',
+            '/full_platform_state',
             self.platform_callback,
             qos
         )
@@ -63,26 +60,40 @@ class MPCNode(Node):
 
 
     def quadcopter_callback(self, msg: QuadcopterState):
+        pos = np.array(msg.position, dtype=float)
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+
+        if self.prev_drone_pos is None:
+            vel = np.zeros(3)
+        else:
+            dt = stamp - self.prev_drone_stamp
+
+            if 0.0 < dt <= 0.1:
+                vel = (pos - self.prev_drone_pos) / dt
+            else:
+                vel = np.zeros(3)
+
         self.x_hat = np.array([
-            msg.position[0], msg.position[1], msg.position[2],
-            msg.velocity[0], msg.velocity[1], msg.velocity[2],
+            pos[0], pos[1], pos[2],
+            vel[0], vel[1], vel[2],
             msg.attitude[0], msg.attitude[1]
         ])
+        self.prev_drone_pos = pos
+        self.prev_drone_stamp = stamp
 
     def platform_callback(self, msg):
-        self.platform_state = msg
+        self.platform_pos = np.array(msg.position, dtype=float)
+        self.platform_vel = np.array(msg.velocity, dtype=float)
 
     def control_loop(self):
-        if self.platform_state is None or self.x_hat is None: 
+        if self.platform_pos is None or self.platform_vel is None or self.x_hat is None: 
             self.get_logger().warn(
                 "Waiting for state estimate and platform state", 
                 throttle_duration_sec=2
             )
             return
 
-        px = self.platform_state.position[0]
-        py = self.platform_state.position[1]
-        refs = generate_platform_preview(px, py, self.N_horizon, self.nx)
+        refs = self.get_platform_preview()
 
         for k in range(self.N_horizon):
             yref_k = np.concatenate([refs[k, :], np.zeros(self.nu)])
@@ -100,6 +111,20 @@ class MPCNode(Node):
         cmd.theta_cmd = float(u_opt[1])
         cmd.thrust_dev = float(u_opt[2])
         self.cmd_publisher.publish(cmd)
+
+
+        
+    def get_platform_preview(self):
+        refs = np.zeros((self.N_horizon + 1, self.nx))
+        for i in range(self.N_horizon + 1):
+            tau = i * self.h
+            p_pred = self.platform_pos + self.platform_vel * tau
+
+            refs[i, 0] = p_pred[0]
+            refs[i, 1] = p_pred[1]
+            refs[i, 2] = p_pred[2] + self.TRACK_HEIGHT
+
+        return refs
 
 
 def main(args=None):
