@@ -51,8 +51,8 @@ class PositionVelocityKalmanFilter:
         innovation_covariance = self.kf.H @ self.kf.P @ self.kf.H.T + self.kf.R
         nis = float(innovation @ np.linalg.solve(innovation_covariance, innovation))
 
-        # if nis_threshold is not None and nis > nis_threshold:
-        #     return nis, False
+        if nis_threshold is not None and nis > nis_threshold:
+            return nis, False
         self.kf.update(pos_measured)
         return nis, True
     
