@@ -116,6 +116,7 @@ class OptitrackBridgeNode(Node):
             float(position[2])
         ]
         platform_msg.attitude = [phi, theta, psi]
+        platform_msg.velocity = [0.0, 0.0, 0.0]
         self.platform_publisher.publish(platform_msg)
 
 

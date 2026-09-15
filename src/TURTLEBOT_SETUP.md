@@ -128,6 +128,8 @@ colcon build --symlink-install --packages-select thesis_platform_controller
 source install/setup.bash
 ros2 run thesis_platform_controller platform_controller
 ```
+Or to run a launch file
+`ros2 launch thesis_platform_controller platform_controller.launch.py radius:=0.8 linspeed:=0.1`
 
 You can also run the package with parameters (if you accept parameters in the code) as below
 ```

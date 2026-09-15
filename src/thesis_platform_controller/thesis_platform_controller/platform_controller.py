@@ -13,7 +13,7 @@ class PlatformController(Node):
         state_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
         self.publisher = self.create_publisher(TwistStamped, '/cmd_vel', cmd_qos)
-        self.subcriber = self.create_subscription(PlatformState, 'measured_platform_state', self.state_callback, state_qos)
+        self.subcriber = self.create_subscription(PlatformState, '/measured_platform_state', self.state_callback, state_qos)
         self.timer = self.create_timer(0.05, self.simple_circle_path)
 
         self.centre = None
@@ -109,41 +109,46 @@ class PlatformController(Node):
 
 
     def state_callback(self, msg: PlatformState):
-        prev_pose = self.pose
-        x = float(msg.position[0])
-        y = float(msg.position[1])
-        yaw = -float(msg.attitude[2])
-        if math.isnan(x) or math.isnan(y) or math.isnan(yaw):
-            return
-
-        if prev_pose is not None:
-            yaw_diff = math.atan2(math.sin(yaw-prev_pose[2]), math.cos(yaw-prev_pose[2]))
-            if abs(yaw_diff) > self.YAW_JUMP_LIMIT:
+        try:
+            prev_pose = self.pose
+            x = float(msg.position[0])
+            y = float(msg.position[1])
+            yaw = -float(msg.attitude[2])
+            if math.isnan(x) or math.isnan(y) or math.isnan(yaw):
                 return
-            
-        self.pose = (x, y, yaw)
-        self.last_pose_time = self.get_clock().now()
 
-        if self.centre is None:
-            self.initial_calibration(x, y, yaw)
-            return
+            if prev_pose is not None:
+                prev_yaw = prev_pose[2]
+                yaw_diff = math.atan2(math.sin(yaw-prev_yaw), math.cos(yaw-prev_yaw))
+                if abs(yaw_diff) > self.YAW_JUMP_LIMIT:
+                    self.get_logger().warn(f"Ignored large yaw jump: {math.degrees(yaw_diff):.1f} deg")
+                    return
+                
+            self.pose = (x, y, yaw)
+            self.last_pose_time = self.get_clock().now()
+
+            if self.centre is None:
+                self.initial_calibration(x, y, yaw)
+                return
 
 
-        t = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
-        if not self.refit_done:
-            self.refit_points.append((t, x, y))
-            if t > self.REFIT_AFTER:
-                self.refit_circle()
+            t = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+            if not self.refit_done:
+                self.refit_points.append((t, x, y))
+                if t > self.REFIT_AFTER:
+                    self.refit_circle()
 
-        nx, ny = self.nominal_at(t)
-        phi = self.omega * t + self.yaw_offset
+            nx, ny = self.nominal_at(t)
+            phi = self.omega * t + self.yaw_offset
 
-        rx, ry = x - nx, y - ny
-        radial = rx * math.cos(phi) + ry * math.sin(phi)
-        tangential = -rx * math.sin(phi) + ry * math.cos(phi)
+            rx, ry = x - nx, y - ny
+            radial = rx * math.cos(phi) + ry * math.sin(phi)
+            tangential = -rx * math.sin(phi) + ry * math.cos(phi)
 
-        self.off_r += self.alpha * (radial - self.off_r)
-        self.off_t += self.alpha * (tangential - self.off_t)
+            self.off_r += self.alpha * (radial - self.off_r)
+            self.off_t += self.alpha * (tangential - self.off_t)
+        except Exception as e:
+            self.get_logger().error(f"Error in state callback: {e}", throttle_duration_sec=1.0)
 
       
     def pose_age(self):
@@ -153,7 +158,9 @@ class PlatformController(Node):
 
 
     def simple_circle_path(self):
-        if self.centre is None: return
+        if self.centre is None: 
+            self.get_logger().warn("No centre set yet, waiting for measurements...", throttle_duration_sec=2.0)
+            return
         
         now = self.get_clock().now()
         delta_t = (now - self.start_time).nanoseconds * 1e-9
