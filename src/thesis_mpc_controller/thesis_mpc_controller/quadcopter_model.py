@@ -38,7 +38,7 @@ def export_quadcopter_ode_model(Ax, Ay, Az, tau_phi, tau_theta, m) -> AcadosMode
     # dynamics
     f_expl = vertcat(
         vx, vy, vz,
-        -Ax*vx + g*phi, -Ay*vy - g*theta, -Az*vz + T_dev/m,
+        -Ax*vx + g*theta, -Ay*vy - g*phi, -Az*vz + T_dev/m,
         (phi_cmd-phi)/tau_phi, (theta_cmd-theta)/tau_theta
     )
     f_impl = state_dot - f_expl

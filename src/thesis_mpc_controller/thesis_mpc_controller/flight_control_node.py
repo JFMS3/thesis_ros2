@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from math import sqrt
 
-from thesis_interfaces.msg import QuadcopterState
+from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand
 
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
-TAKEOFF_DURATION = 4.0
+TAKEOFF_DURATION = 2.0
 LAND_DURATION = 3
 MAX_POSSIBLE_SPEED = 3
 
@@ -28,14 +28,14 @@ class QuadcopterSequence(Enum):
     ARMING = auto()
     TAKEOFF = auto()
     HOVERING = auto()
-    FLYING = auto()
+    MPC_ACTIVE = auto()
     LANDING = auto()
     DONE = auto()
 
 
-class SimpleHoverNode(Node):
+class FlightControlNode(Node):
     def __init__(self):
-        super().__init__('simple_hover_node')
+        super().__init__('flight_control_node')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
         self.got_first_state = False
@@ -53,17 +53,14 @@ class SimpleHoverNode(Node):
         self._hover_commanded = False
         self.rejected_count = 0
 
-        self.declare_parameter('TARGET_HEIGHT', 1.0)
+        self.declare_parameter('TARGET_HEIGHT', 0.4)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
-        self.declare_parameter('HOVER_DURATION', 30.0)
+        self.declare_parameter('HOVER_DURATION', 3.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
-        
-        self.declare_parameter('HOVER_THRUST', 39000)
-        self.HOVER_THRUST = int(self.get_parameter('HOVER_THRUST').value)
 
-        self.subscription = self.create_subscription(
+        self.quadcopter_state_subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
         )
 
@@ -76,63 +73,19 @@ class SimpleHoverNode(Node):
         self.get_logger().info("Radio link set up")
         self.cf.param.set_value('stabilizer.estimator', '2')
 
-        now = self.get_clock().now()
-        dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
-        log_dir_name = f"thrust_classification_{dt_object.strftime("%H_%M")}"
-        pos_log_path = Path(f'log/{log_dir_name}/position.csv')
-        pos_log_path.parent.mkdir(parents=True, exist_ok=True)
-        att_log_path = Path(f'log/{log_dir_name}/attitude.csv')
-
-        self.position_log_file = open(pos_log_path, 'w', newline='')
-        self.position_csv_writer = csv.writer(self.position_log_file)
-        self.position_csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'x', 'y', 'z', 'varX', 'varY', 'varZ', 'extra'])
-        self.position_onboard_log = LogConfig(name='Position', period_in_ms=20)
-        self.position_onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
-        self.position_onboard_log.add_variable('stateEstimate.x', 'float')
-        self.position_onboard_log.add_variable('stateEstimate.y', 'float')
-        self.position_onboard_log.add_variable('stateEstimate.z', 'float')
-        self.position_onboard_log.add_variable('kalman.varX', 'float')
-        self.position_onboard_log.add_variable('kalman.varY', 'float')
-        self.position_onboard_log.add_variable('kalman.varZ', 'float')
-        self.cf.log.add_config(self.position_onboard_log)
-        self.position_onboard_log.data_received_cb.add_callback(self.onboard_position_cb)
-        self.position_onboard_log.start()
-
-        self.attitude_log_file = open(att_log_path, 'w', newline='')
-        self.attitude_csv_writer = csv.writer(self.attitude_log_file)
-        self.attitude_csv_writer.writerow(['t', 'source', 'sequence', 'thrust', 'estimatedRoll', 'estimatedPitch', 'estimatedYaw', 'controllerRoll', 'controllerPitch', 'controllerYaw', 'extra'])
-        self.attitude_onboard_log = LogConfig(name='Attitude', period_in_ms=20)
-        self.attitude_onboard_log.add_variable('stabilizer.thrust', 'uint16_t')
-        self.attitude_onboard_log.add_variable('stateEstimate.roll', 'float')
-        self.attitude_onboard_log.add_variable('stateEstimate.pitch', 'float')
-        self.attitude_onboard_log.add_variable('stateEstimate.yaw', 'float')
-        self.attitude_onboard_log.add_variable('controller.roll', 'float')
-        self.attitude_onboard_log.add_variable('controller.pitch', 'float')
-        self.attitude_onboard_log.add_variable('controller.yaw', 'float')
-        self.cf.log.add_config(self.attitude_onboard_log)
-        self.attitude_onboard_log.data_received_cb.add_callback(self.onboard_attitude_cb)
-        self.attitude_onboard_log.start()
-
-
-        self.timer = self.create_timer(0.05, self.step_sequence)
+        self.timer = self.create_timer(0.1, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
+
+        self.controller_mode_publisher = self.create_publisher(
+            ControllerMode,
+            '/controller_mode',
+            qos
+        )
+
+        self.mpc_cmd_subscription = self.create_subscription(
+            MPCCommand, '/mpc_cmd', self.mpc_cmd_callback, 10
+        )
         
-
-    def onboard_position_cb(self, timestamp, data, logconf):
-        t = self.get_clock().now().nanoseconds / 1e9
-        self.position_csv_writer.writerow([
-            t, 'onboard', self.sequence.name, data['stabilizer.thrust'],
-            data['stateEstimate.x'], data['stateEstimate.y'], data['stateEstimate.z'],
-            data['kalman.varX'], data['kalman.varY'], data['kalman.varZ'], ''
-        ])
-
-    def onboard_attitude_cb(self, timestamp, data, logconf):
-        t = self.get_clock().now().nanoseconds / 1e9
-        self.attitude_csv_writer.writerow([
-            t, 'onboard', self.sequence.name, data['stabilizer.thrust'],
-            data['stateEstimate.roll'], data['stateEstimate.pitch'], data['stateEstimate.yaw'],
-            data['controller.roll'], data['controller.pitch'], data['controller.yaw'], ''
-        ])
 
 
     def sequence_callback(self, msg: QuadcopterState):
@@ -149,13 +102,6 @@ class SimpleHoverNode(Node):
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
-
-        if z > self.MAX_HEIGHT:
-            self.get_logger().warn("Climbed too high, cutting power!")
-            self.cf.high_level_commander.stop()
-            self.cf.commander.send_stop_setpoint()
-            self.emergency_stopped = True
-            return
         
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
@@ -180,7 +126,6 @@ class SimpleHoverNode(Node):
                 else:
                     self.consecutive_rejects = 0
 
-
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
         self.last_valid_time = now
@@ -190,6 +135,13 @@ class SimpleHoverNode(Node):
             self.position_csv_writer.writerow([t, 'extpos_sent', self.sequence.name, '', x, y, z, '', '', '', ''])
         except Exception as e:
             self.get_logger().error(f"Failed to send extpos: {e}")
+
+
+    def mpc_cmd_callback(self, msg: MPCCommand):
+        if self.sequence != QuadcopterSequence.MPC_ACTIVE:
+            return
+
+        
 
 
     def enter_state(self, new_state: QuadcopterSequence):
@@ -212,6 +164,7 @@ class SimpleHoverNode(Node):
             self.sync_cf.close_link()
         except Exception:
             pass
+
 
     def emergency_land(self):
         if self.sequence in (QuadcopterSequence.DONE, QuadcopterSequence.WAITING_FOR_STATE):
@@ -269,26 +222,29 @@ class SimpleHoverNode(Node):
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
                 self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
-                self.enter_state(QuadcopterSequence.HOVERING)
-                    
-                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)
-                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.HOVER_THRUST)
-
-                # if not self._hover_commanded:
-                #     self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
-                #     self._hover_commanded = True
-                # if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
-                #     self.get_logger().info(f"Just chilling for {self.HOVER_DURATION}s now")
-                #     self.enter_state(QuadcopterSequence.HOVERING)
+                if not self._hover_commanded:
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
+                    self._hover_commanded = True
+                if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
+                    self.get_logger().info(f"Hovering for {self.HOVER_DURATION}s")
+                    self.enter_state(QuadcopterSequence.HOVERING)
 
         elif self.sequence == QuadcopterSequence.HOVERING:
-            self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.HOVER_THRUST)
-
             if self.time_elapsed() > self.HOVER_DURATION:
-                self.cf.commander.send_notify_setpoint_stop()
-                self.get_logger().info(f"Landing...")
-                self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)
-                self.enter_state(QuadcopterSequence.LANDING)
+                self.get_logger().info(f"Transitioning to MPC control...")
+
+                controller_mode = ControllerMode()
+                controller_mode.header.stamp = self.get_clock().now().to_msg()
+                controller_mode.mode = ControllerMode.TRACKING_MODE
+                controller_mode.mpc_active = ControllerMode.MPC_ACTIVE
+                controller_mode.t_start_land = 0
+                controller_mode.z_start_land = 0
+
+                self.enter_state(QuadcopterSequence.MPC_ACTIVE)
+
+        elif self.sequence == QuadcopterSequence.MPC_ACTIVE:
+            pass
+
 
         elif self.sequence == QuadcopterSequence.LANDING:
             if self.time_elapsed() > LAND_DURATION + 0.5:
@@ -302,7 +258,7 @@ class SimpleHoverNode(Node):
 
 def main():
     rclpy.init()
-    node = SimpleHoverNode()
+    node = FlightControlNode()
 
     try:
         rclpy.spin(node)
@@ -314,10 +270,6 @@ def main():
         node.emergency_land()
     finally:
         try:
-            node.position_onboard_log.stop()
-            node.attitude_onboard_log.stop()
-            node.position_log_file.close()
-            node.attitude_log_file.close()
             node.sync_cf.close_link()
         except Exception:
             pass
@@ -344,7 +296,3 @@ ros2 run thesis_optitrack_bridge hover_test_node
 (when done)
 usbipd detach --busid <BUS_ID>
 '''
-
-
-# AVERAGE THRUST: 38895 (CF units)
-# Seems like 39065

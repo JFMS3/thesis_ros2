@@ -40,6 +40,8 @@ class MPCNode(Node):
         self.prev_drone_pos = None # for now not using drone kalman filter
         self.prev_drone_stamp = None
 
+        self.mpc_enabled = False
+
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
             '/measured_quadcopter_state',
@@ -56,6 +58,13 @@ class MPCNode(Node):
 
         self.cmd_publisher = self.create_publisher(
             MPCCommand, '/mpc_cmd', 10
+        )
+
+        self.controller_mode_subscription = self.create_subscription(
+            ControllerMode,
+            '/controller_mode',
+            self.controller_mode_callback,
+            qos
         )
 
 
@@ -81,11 +90,23 @@ class MPCNode(Node):
         self.prev_drone_pos = pos
         self.prev_drone_stamp = stamp
 
+
     def platform_callback(self, msg):
         self.platform_pos = np.array(msg.position, dtype=float)
         self.platform_vel = np.array(msg.velocity, dtype=float)
 
+
+    def controller_mode_callback(self, msg):
+        was_enabled = self.mpc_enabled
+        self.mpc_enabled = msg.mode = ControllerMode.MPC_ACTIVE
+        if self.mpc_enabled and not was_enabled:
+            self.get_logger().info("MPC mode active")
+
+
     def control_loop(self):
+        if not self.mpc_enabled:
+            return
+        
         if self.platform_pos is None or self.platform_vel is None or self.x_hat is None: 
             self.get_logger().warn(
                 "Waiting for state estimate and platform state", 

@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'kalman_filter_node = thesis_mpc_controller.kalman_filter_node:main',
-            'synthetic_source = thesis_mpc_controller.synthetic_source:main'
+            'synthetic_source = thesis_mpc_controller.synthetic_source:main',
+            'mpc_node = thesis_mpc_controller.mpc_node:main'
         ],
     },
 )
