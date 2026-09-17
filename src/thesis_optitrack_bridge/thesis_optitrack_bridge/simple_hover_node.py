@@ -52,6 +52,7 @@ class SimpleHoverNode(Node):
         self.emergency_stopped = False
         self._hover_commanded = False
         self.rejected_count = 0
+        self.consecutive_rejects = 0
 
         self.declare_parameter('TARGET_HEIGHT', 1.0)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
@@ -76,12 +77,19 @@ class SimpleHoverNode(Node):
         self.get_logger().info("Radio link set up")
         self.cf.param.set_value('stabilizer.estimator', '2')
 
-        now = self.get_clock().now()
-        dt_object = datetime.fromtimestamp(now.nanoseconds / 1e9)
-        log_dir_name = f"thrust_classification_{dt_object.strftime("%H_%M")}"
-        pos_log_path = Path(f'log/{log_dir_name}/position.csv')
-        pos_log_path.parent.mkdir(parents=True, exist_ok=True)
-        att_log_path = Path(f'log/{log_dir_name}/attitude.csv')
+        self.declare_parameter('log_dir', '')
+        log_dir = self.get_parameter('log_dir').value
+        
+        if log_dir:
+            log_dir = Path(log_dir)
+        else:
+            log_dir = Path('log')
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        pos_log_path = Path(f'{log_dir}/position.csv')
+        att_log_path = Path(f'{log_dir}/attitude.csv')
+        self.get_logger().info(f"Saving pos file to {pos_log_path}")
 
         self.position_log_file = open(pos_log_path, 'w', newline='')
         self.position_csv_writer = csv.writer(self.position_log_file)
