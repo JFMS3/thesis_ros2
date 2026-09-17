@@ -6,7 +6,7 @@ def export_quadcopter_ode_model(Ax, Ay, Az, tau_phi, tau_theta, m) -> AcadosMode
     model_name = 'quadcopter_ode'
 
     # constants
-    g=9.81 # gravity constant [m/s^2]
+    g=9.81
 
     # states
     x = SX.sym('x')

@@ -1,6 +1,7 @@
 std_msgs/Header header
 uint8 TRACKING_MODE = 0
 uint8 LANDING_MODE = 1
+uint8 MPC_INACTIVE = 0
 uint8 MPC_ACTIVE = 1
 
 uint8 mode

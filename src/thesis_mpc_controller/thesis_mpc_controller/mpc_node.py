@@ -5,12 +5,14 @@ from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode
 from .kalman_filter import PositionVelocityKalmanFilter
 from .quadcopter_solver import setup_ocp_solver
 import numpy as np
+from math import isfinite
 
 
 class MPCNode(Node):
     def __init__(self):
         super().__init__('mpc_node')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
+        mpc_active_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         
         self.declare_parameter('fs', 20)
         self.fs = self.get_parameter('fs').value
@@ -21,6 +23,21 @@ class MPCNode(Node):
         self.Tf = self.N_horizon*self.h
         Ax, Ay, Az = 0.2, 0.2, 0.4
         tau_phi, tau_theta = 0.2, 0.2
+        self.declare_parameter('Ax', 0.6)
+        self.declare_parameter('Ay', 0.6)
+        self.declare_parameter('Az', 0.6)
+        self.declare_parameter('tau_phi', 94.6e-4)
+        self.declare_parameter('tau_theta', 94.6e-4)
+
+        Ax = float(self.get_parameter('Ax').value)
+        Ay = float(self.get_parameter('Ay').value)
+        Az = float(self.get_parameter('Az').value)
+        tau_phi = float(self.get_parameter('tau_phi').value)
+        tau_theta = float(self.get_parameter('tau_theta').value)
+
+        self.vel_lpf_alpha = 0.3 # higher = more smoothing, more lag
+        self.vel_filt = np.zeros(3)
+        
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -36,9 +53,12 @@ class MPCNode(Node):
         self.mode = ControllerMode.TRACKING_MODE
         self.timer = self.create_timer(self.h, self.control_loop)
 
-        self.TRACK_HEIGHT = 1.0 # just make drone hover 1m above platform for now
+        
+        self.declare_parameter('TRACK_HEIGHT', 1.0)
+        self.TRACK_HEIGHT = float(self.get_parameter('TRACK_HEIGHT').value) # just make drone hover 1m above platform for now
         self.prev_drone_pos = None # for now not using drone kalman filter
         self.prev_drone_stamp = None
+        
 
         self.mpc_enabled = False
 
@@ -64,7 +84,7 @@ class MPCNode(Node):
             ControllerMode,
             '/controller_mode',
             self.controller_mode_callback,
-            qos
+            mpc_active_qos
         )
 
 
@@ -73,14 +93,17 @@ class MPCNode(Node):
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
         if self.prev_drone_pos is None:
-            vel = np.zeros(3)
+            vel_raw = np.zeros(3)
         else:
             dt = stamp - self.prev_drone_stamp
 
             if 0.0 < dt <= 0.1:
-                vel = (pos - self.prev_drone_pos) / dt
+                vel_raw = (pos - self.prev_drone_pos) / dt
             else:
-                vel = np.zeros(3)
+                vel_raw = np.zeros(3)
+
+        self.vel_filt = self.vel_lpf_alpha * vel_raw + (1-self.vel_lpf_alpha) * self.vel_filt
+        vel = self.vel_filt
 
         self.x_hat = np.array([
             pos[0], pos[1], pos[2],
@@ -98,9 +121,11 @@ class MPCNode(Node):
 
     def controller_mode_callback(self, msg):
         was_enabled = self.mpc_enabled
-        self.mpc_enabled = msg.mode = ControllerMode.MPC_ACTIVE
+        self.mpc_enabled = msg.mpc_active == ControllerMode.MPC_ACTIVE
         if self.mpc_enabled and not was_enabled:
             self.get_logger().info("MPC mode active")
+            self.ref_offset = None
+            self.mpc_enabled_at = self.get_clock().now()
 
 
     def control_loop(self):
@@ -109,9 +134,13 @@ class MPCNode(Node):
         
         if self.platform_pos is None or self.platform_vel is None or self.x_hat is None: 
             self.get_logger().warn(
-                "Waiting for state estimate and platform state", 
-                throttle_duration_sec=2
+                "Waiting for state estimate and platform state", throttle_duration_sec=2
             )
+            return
+
+        quadcopter_state_age = self.get_clock().now().nanoseconds * 1e-9 - self.prev_drone_stamp
+        if quadcopter_state_age > 0.15:
+            self.get_logger().warn(f"Haven't received valid quadcopter state for {quadcopter_state_age:.2f}s, not solving MPC", throttle_duration_sec=1.0)
             return
 
         refs = self.get_platform_preview()
@@ -131,6 +160,9 @@ class MPCNode(Node):
         cmd.phi_cmd = float(u_opt[0])
         cmd.theta_cmd = float(u_opt[1])
         cmd.thrust_dev = float(u_opt[2])
+        if not isfinite(cmd.phi_cmd) or not isfinite(cmd.theta_cmd) or not isfinite(cmd.thrust_dev):
+            self.get_logger().error("Invalid MPC command")
+            return
         self.cmd_publisher.publish(cmd)
 
 
@@ -139,7 +171,8 @@ class MPCNode(Node):
         refs = np.zeros((self.N_horizon + 1, self.nx))
         for i in range(self.N_horizon + 1):
             tau = i * self.h
-            p_pred = self.platform_pos + self.platform_vel * tau
+            p_pred = self.platform_pos # assumes stationary platform
+            #p_pred = self.platform_pos + self.platform_vel * tau
 
             refs[i, 0] = p_pred[0]
             refs[i, 1] = p_pred[1]

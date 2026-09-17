@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'thesis_mpc_controller'
 
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name='launch'), glob('launch/*.py')),
+        (os.path.join('share', package_name='config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -26,7 +30,8 @@ setup(
         'console_scripts': [
             'kalman_filter_node = thesis_mpc_controller.kalman_filter_node:main',
             'synthetic_source = thesis_mpc_controller.synthetic_source:main',
-            'mpc_node = thesis_mpc_controller.mpc_node:main'
+            'mpc_node = thesis_mpc_controller.mpc_node:main',
+            'flight_control_node = thesis_mpc_controller.flight_control_node:main',
         ],
     },
 )

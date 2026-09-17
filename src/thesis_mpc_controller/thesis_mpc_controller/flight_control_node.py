@@ -3,9 +3,9 @@ from enum import Enum, auto
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from math import sqrt
+from math import sqrt, degrees, radians
 
-from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand
+from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand, PlatformState
 
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
@@ -22,12 +22,14 @@ TAKEOFF_DURATION = 2.0
 LAND_DURATION = 3
 MAX_POSSIBLE_SPEED = 3
 
+
 class QuadcopterSequence(Enum):
     WAITING_FOR_STATE = auto()
     STARTING_ESTIMATOR = auto()
     ARMING = auto()
     TAKEOFF = auto()
     HOVERING = auto()
+    HANDOVER = auto()
     MPC_ACTIVE = auto()
     LANDING = auto()
     DONE = auto()
@@ -37,6 +39,7 @@ class FlightControlNode(Node):
     def __init__(self):
         super().__init__('flight_control_node')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
+        mpc_active_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
         self.got_first_state = False
         self.starting_position = []
@@ -44,6 +47,7 @@ class FlightControlNode(Node):
         self.state_entered_at = self.get_clock().now()
         self.target_z = None
         self.last_valid_pos = None
+        self.last_valid_att = None
         self.last_valid_time = None
 
         self.last_msg_time = None
@@ -52,17 +56,28 @@ class FlightControlNode(Node):
         self.emergency_stopped = False
         self._hover_commanded = False
         self.rejected_count = 0
+        self.consecutive_rejects = 0
 
-        self.declare_parameter('TARGET_HEIGHT', 0.4)
-        self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
+        self.latest_mpc_setpoint = None
+        self.latest_mpc_cmd_time = None
+
+        self.declare_parameter('TRACK_HEIGHT', 1.0)
+        self.TRACK_HEIGHT = float(self.get_parameter('TRACK_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
+        self.declare_parameter('MAX_HORIZONTAL_DISPLACEMENT', 1.0)
+        self.MAX_HORIZONTAL_DISPLACEMENT = float(self.get_parameter('MAX_HORIZONTAL_DISPLACEMENT').value)
+        self.declare_parameter('MAX_ATTITUDE_DEG', 25.0)
+        self.MAX_ATTITUDE_DEG = float(self.get_parameter('MAX_ATTITUDE_DEG').value)
         self.declare_parameter('HOVER_DURATION', 3.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
+        self.declare_parameter('HANDOVER_DURATION', 2.0)
+        self.HANDOVER_DURATION = float(self.get_parameter('HANDOVER_DURATION').value)
 
-        self.quadcopter_state_subscription = self.create_subscription(
-            QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
-        )
+        self.declare_parameter('CRAZYFLIE_HOVER_THRUST', 39060)
+        self.CRAZYFLIE_HOVER_THRUST = int(self.get_parameter('CRAZYFLIE_HOVER_THRUST').value)
+        self.declare_parameter('CRAZYFLIE_HOVER_CONSTANT', 102040) # specifically 1 / (9.8e-6)
+        self.CRAZYFLIE_HOVER_CONSTANT = int(self.get_parameter('CRAZYFLIE_HOVER_CONSTANT').value)
 
         cflib.crtp.init_drivers()
         self.get_logger().info("Connecting to CrazyFlie...")
@@ -73,13 +88,20 @@ class FlightControlNode(Node):
         self.get_logger().info("Radio link set up")
         self.cf.param.set_value('stabilizer.estimator', '2')
 
-        self.timer = self.create_timer(0.1, self.step_sequence)
+        self.timer = self.create_timer(0.05, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
+        self.platform_pos = None
+
+        self.quadcopter_state_subscription = self.create_subscription(
+            QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
+        )
+        
+        self.platform_state_subscription = self.create_subscription(
+            PlatformState, '/full_platform_state', self.platform_callback, qos
+        )
 
         self.controller_mode_publisher = self.create_publisher(
-            ControllerMode,
-            '/controller_mode',
-            qos
+            ControllerMode, '/controller_mode', mpc_active_qos
         )
 
         self.mpc_cmd_subscription = self.create_subscription(
@@ -87,6 +109,8 @@ class FlightControlNode(Node):
         )
         
 
+    def platform_callback(self, msg: PlatformState):
+        self.platform_pos = list(msg.position)
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
@@ -106,7 +130,6 @@ class FlightControlNode(Node):
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
             self.starting_position = [x, y, z]
-            self.target_z = z + self.TARGET_HEIGHT
         elif self.last_valid_pos is not None:
             dt = (now - self.last_valid_time).nanoseconds / 1e9
             if dt > 0:
@@ -128,11 +151,10 @@ class FlightControlNode(Node):
 
         self.got_first_state = True
         self.last_valid_pos = (x, y, z)
+        self.last_valid_att = (msg.attitude[0], msg.attitude[1])
         self.last_valid_time = now
         try:
             self.cf.extpos.send_extpos(x, y, z)
-            t = now.nanoseconds / 1e9
-            self.position_csv_writer.writerow([t, 'extpos_sent', self.sequence.name, '', x, y, z, '', '', '', ''])
         except Exception as e:
             self.get_logger().error(f"Failed to send extpos: {e}")
 
@@ -141,17 +163,42 @@ class FlightControlNode(Node):
         if self.sequence != QuadcopterSequence.MPC_ACTIVE:
             return
 
-        
+        phi_cmd = degrees(msg.phi_cmd)
+        theta_cmd = degrees(msg.theta_cmd)
+        thrust_dev = msg.thrust_dev
+        thrust_cmd = self.CRAZYFLIE_HOVER_THRUST + self.CRAZYFLIE_HOVER_CONSTANT * thrust_dev
+        thrust_cmd = int(round(thrust_cmd))
+        thrust_cmd = max(10001, min(60000, thrust_cmd)) # crazyflie limits
+
+        self.latest_mpc_setpoint = (phi_cmd, theta_cmd, 0.0, thrust_cmd)
+        self.latest_mpc_cmd_time = self.get_clock().now()
+
+
+    def check_safety_violation(self):
+        if self.last_valid_pos is None:
+            return "No valid quadcopter position"
+
+        x, y, z = self.last_valid_pos
+        if z > self.MAX_HEIGHT:
+            return f"Height {z} exceeds {self.MAX_HEIGHT}m limit"
+
+        if self.starting_position:
+            dx = x - self.starting_position[0]
+            dy = y - self.starting_position[1]
+            horizontal_distance = sqrt(dx ** 2 + dy**2)
+            if horizontal_distance > self.MAX_HORIZONTAL_DISPLACEMENT:
+                return f"Horizontal displacement {horizontal_distance:.2f} exceeds {self.MAX_HORIZONTAL_DISPLACEMENT}m limit"
+        if self.last_valid_att is not None:
+            phi, theta = self.last_valid_att
+            max_att = radians(self.MAX_ATTITUDE_DEG)
+            if abs(phi) > max_att or abs(theta) > max_att:
+                return f"Excessive attitude: phi={degrees(phi):.1f}deg, theta={degrees(theta):.1f}deg"
+        return None
 
 
     def enter_state(self, new_state: QuadcopterSequence):
         self.sequence = new_state
         self.state_entered_at = self.get_clock().now()
-        if new_state == QuadcopterSequence.FLYING:
-            self._forward_commanded = False
-            self._return_commanded = False
-            self._next_retry_allowed_t = 0.0
-
 
     def time_elapsed(self):
         return (self.get_clock().now() - self.state_entered_at).nanoseconds / 1e9
@@ -166,15 +213,23 @@ class FlightControlNode(Node):
             pass
 
 
-    def emergency_land(self):
+    def emergency_land(self, message=''):
         if self.sequence in (QuadcopterSequence.DONE, QuadcopterSequence.WAITING_FOR_STATE):
             return
-        self.get_logger().warn("Interrupted, trying a safe landing")
-        try:
-            land_height = self.starting_position[2] if self.starting_position else 0
+        self.get_logger().warn(f"Emergency Landing: {message}")
+        controller_mode = ControllerMode()
+        controller_mode.header.stamp = self.get_clock().now().to_msg()
+        controller_mode.mode = ControllerMode.TRACKING_MODE
+        controller_mode.mpc_active = ControllerMode.MPC_INACTIVE
+        controller_mode.t_start_land = 0
+        controller_mode.z_start_land = 0
+        self.controller_mode_publisher.publish(controller_mode)
+
+        try: 
+            self.cf.commander.send_notify_setpoint_stop()
+            land_height = self.starting_position[2] if self.starting_position else 0.0
             self.cf.high_level_commander.land(absolute_height_m=land_height, duration_s=LAND_DURATION)
-            time.sleep(LAND_DURATION + 0.5)
-            self.cf.high_level_commander.stop()
+            self.enter_state(QuadcopterSequence.LANDING)
             self.get_logger().warn("Emergency landing complete")
         except Exception as e:
             self.get_logger().error(f"Failed to emergency land {e}")
@@ -197,7 +252,8 @@ class FlightControlNode(Node):
             return
         
         if self.sequence == QuadcopterSequence.WAITING_FOR_STATE:
-            if self.got_first_state:
+            if self.got_first_state and self.platform_pos is not None:
+                self.target_z = self.platform_pos[2] + self.TRACK_HEIGHT
                 self.reset_internal_kalman()
                 self.enter_state(QuadcopterSequence.STARTING_ESTIMATOR)
             elif self.time_elapsed() > 30:
@@ -231,7 +287,15 @@ class FlightControlNode(Node):
 
         elif self.sequence == QuadcopterSequence.HOVERING:
             if self.time_elapsed() > self.HOVER_DURATION:
-                self.get_logger().info(f"Transitioning to MPC control...")
+                self.get_logger().info(f"Handing over to low level control...")
+                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)
+                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
+                self.enter_state(QuadcopterSequence.HANDOVER)
+
+        elif self.sequence == QuadcopterSequence.HANDOVER:
+            self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
+            if self.time_elapsed() > self.HANDOVER_DURATION:
+                self.get_logger().info(f"Transitioning to MPC control... ")
 
                 controller_mode = ControllerMode()
                 controller_mode.header.stamp = self.get_clock().now().to_msg()
@@ -239,12 +303,44 @@ class FlightControlNode(Node):
                 controller_mode.mpc_active = ControllerMode.MPC_ACTIVE
                 controller_mode.t_start_land = 0
                 controller_mode.z_start_land = 0
-
+                self.controller_mode_publisher.publish(controller_mode)
+                self.latest_mpc_setpoint = None
+                self.latest_mpc_cmd_time = None
                 self.enter_state(QuadcopterSequence.MPC_ACTIVE)
-
+            
         elif self.sequence == QuadcopterSequence.MPC_ACTIVE:
-            pass
+            if self.last_valid_time is None:
+                self.emergency_land("No valid quadcopter state received")
+                return
 
+            state_age = (self.get_clock().now() - self.last_valid_time).nanoseconds * 1e-9
+            if state_age > 0.2:
+                self.emergency_land("Quadcopter state stale for more than 0.2s")
+                return
+            
+            # violation = self.check_safety_violation()
+            # if violation  is not None:
+            #     self.emergency_land(violation)
+            #     return
+            
+            if self.latest_mpc_cmd_time is None or self.latest_mpc_setpoint is None:
+                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
+                if self.time_elapsed() > 1.0:
+                    self.emergency_land("No MPC commands received")
+                return
+
+            cmd_age = (self.get_clock().now() - self.latest_mpc_cmd_time).nanoseconds * 1e-9
+            if cmd_age > 1.0:
+                self.emergency_land("No MPC commands received 1s, landing")
+                return
+            elif cmd_age > 0.2:
+                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
+                return
+
+            #normal mpc operation
+            phi, theta, yaw_rate, thrust = self.latest_mpc_setpoint
+            self.cf.commander.send_setpoint(phi, theta, yaw_rate, thrust)
+            
 
         elif self.sequence == QuadcopterSequence.LANDING:
             if self.time_elapsed() > LAND_DURATION + 0.5:
