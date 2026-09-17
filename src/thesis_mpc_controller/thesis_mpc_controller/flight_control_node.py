@@ -107,7 +107,56 @@ class FlightControlNode(Node):
         self.mpc_cmd_subscription = self.create_subscription(
             MPCCommand, '/mpc_cmd', self.mpc_cmd_callback, 10
         )
-        
+
+        log_dir = Path.home() / "preliminary_mpc_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f"flight_control_{timestamp}.csv"
+
+        self.log_file = open(log_path, "w", newline="", buffering=1)
+        self.log_writer = csv.writer(self.log_file)
+
+        self.log_writer.writerow([
+            "time", "sequence", "x", "y", "z",
+            "phi_measured", "theta_measured", 
+            "sent_phi_deg", "sent_theta_deg", "sent_thrust_raw",
+            "state_age", "mpc_cmd_age", "rejected_optitrack_count",
+        ])
+
+        self.get_logger().info(f"Logging flight data to {log_path}")
+        self.last_sent_phi = 0.0
+        self.last_sent_theta = 0.0
+        self.last_sent_thrust = 0
+
+    def log_flight_data(self):
+        now = self.get_clock().now()
+        if self.last_valid_pos is not None:
+            x, y, z = self.last_valid_pos
+        else:
+            x = y = z = float("nan")
+
+        if self.last_valid_att is not None:
+            phi, theta = self.last_valid_att
+        else:
+            phi = theta = float("nan")
+
+        if self.last_valid_time is not None:
+            state_age = (now - self.last_valid_time).nanoseconds * 1e-9
+        else:
+            state_age = float("nan")
+
+        if self.latest_mpc_cmd_time is not None:
+            mpc_cmd_age = (now - self.latest_mpc_cmd_time).nanoseconds * 1e-9
+        else:
+            mpc_cmd_age = float("nan")
+
+        self.log_writer.writerow([
+            now.nanoseconds * 1e-9,
+            self.sequence.name, x, y, z,
+            phi, theta, self.last_sent_phi,
+            self.last_sent_theta, self.last_sent_thrust,
+            state_age, mpc_cmd_age, self.rejected_count,
+        ])
 
     def platform_callback(self, msg: PlatformState):
         self.platform_pos = list(msg.position)
@@ -250,7 +299,7 @@ class FlightControlNode(Node):
     def step_sequence(self):
         if self.emergency_stopped:
             return
-        
+        self.log_flight_data()
         if self.sequence == QuadcopterSequence.WAITING_FOR_STATE:
             if self.got_first_state and self.platform_pos is not None:
                 self.target_z = self.platform_pos[2] + self.TRACK_HEIGHT
@@ -366,6 +415,7 @@ def main():
         node.emergency_land()
     finally:
         try:
+            node.log_file.close()
             node.sync_cf.close_link()
         except Exception:
             pass

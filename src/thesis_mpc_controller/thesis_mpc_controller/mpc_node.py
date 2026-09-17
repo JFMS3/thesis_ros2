@@ -6,6 +6,9 @@ from .kalman_filter import PositionVelocityKalmanFilter
 from .quadcopter_solver import setup_ocp_solver
 import numpy as np
 from math import isfinite
+import csv
+from datetime import datetime
+from pathlib import Path
 
 
 class MPCNode(Node):
@@ -87,6 +90,20 @@ class MPCNode(Node):
             mpc_active_qos
         )
 
+        log_dir = Path.home() / "preliminary_mpc_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f"mpc_{timestamp}.csv"
+
+        self.log_file = open(log_path, "w", newline="", buffering=1)
+        self.log_writer = csv.writer(self.log_file)
+        self.log_writer.writerow([
+            "time", "x", "y", "z", "vx", "vy", "vz",
+            "phi", "theta", "ref_x", "ref_y", "ref_z",
+            "phi_cmd", "theta_cmd", "thrust_dev", "solver_status",
+        ])
+        self.get_logger().info(f"Logging MPC data to {log_path}")
+
 
     def quadcopter_callback(self, msg: QuadcopterState):
         pos = np.array(msg.position, dtype=float)
@@ -151,6 +168,15 @@ class MPCNode(Node):
         self.ocp_solver.cost_set(self.N_horizon, 'yref', refs[self.N_horizon, :])
 
         u_opt = self.ocp_solver.solve_for_x0(x0_bar=self.x_hat, fail_on_nonzero_status=False)
+        solver_status = self.ocp_solver.status
+        now = self.get_clock().now()
+
+        self.log_writer.writerow([
+            now.nanoseconds * 1e-9, self.x_hat[0], self.x_hat[1], self.x_hat[2],
+            self.x_hat[3], self.x_hat[4], self.x_hat[5], self.x_hat[6], self.x_hat[7],
+            refs[0, 0], refs[0, 1], refs[0, 2], u_opt[0], u_opt[1], u_opt[2], solver_status,
+        ])
+
         if self.ocp_solver.status != 0:
             self.get_logger().warn(f'MPC solver failed with status {self.ocp_solver.status}')
             return

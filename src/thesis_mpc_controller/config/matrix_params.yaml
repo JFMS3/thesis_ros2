@@ -20,6 +20,6 @@
     Ax: 0.6
     Ay: 0.6
     Az: 0.6
-    tau_phi: 94.6e-4
-    tau_theta: 94.6e-4
+    tau_phi: 94.6e-3
+    tau_theta: 94.6e-3
     m: 0.04
