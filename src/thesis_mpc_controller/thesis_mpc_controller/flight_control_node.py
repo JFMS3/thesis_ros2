@@ -74,7 +74,7 @@ class FlightControlNode(Node):
         self.declare_parameter('HANDOVER_DURATION', 2.0)
         self.HANDOVER_DURATION = float(self.get_parameter('HANDOVER_DURATION').value)
 
-        self.declare_parameter('CRAZYFLIE_HOVER_THRUST', 39060)
+        self.declare_parameter('CRAZYFLIE_HOVER_THRUST', 39250)
         self.CRAZYFLIE_HOVER_THRUST = int(self.get_parameter('CRAZYFLIE_HOVER_THRUST').value)
         self.declare_parameter('CRAZYFLIE_HOVER_CONSTANT', 102040) # specifically 1 / (9.8e-6)
         self.CRAZYFLIE_HOVER_CONSTANT = int(self.get_parameter('CRAZYFLIE_HOVER_CONSTANT').value)
@@ -160,6 +160,7 @@ class FlightControlNode(Node):
 
     def platform_callback(self, msg: PlatformState):
         self.platform_pos = list(msg.position)
+
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
@@ -270,8 +271,8 @@ class FlightControlNode(Node):
         controller_mode.header.stamp = self.get_clock().now().to_msg()
         controller_mode.mode = ControllerMode.TRACKING_MODE
         controller_mode.mpc_active = ControllerMode.MPC_INACTIVE
-        controller_mode.t_start_land = 0
-        controller_mode.z_start_land = 0
+        controller_mode.t_start_land = 0.0
+        controller_mode.z_start_land = 0.0
         self.controller_mode_publisher.publish(controller_mode)
 
         try: 
@@ -326,8 +327,8 @@ class FlightControlNode(Node):
 
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
-                self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
                 if not self._hover_commanded:
+                    self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
                     self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
                     self._hover_commanded = True
                 if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
@@ -350,8 +351,8 @@ class FlightControlNode(Node):
                 controller_mode.header.stamp = self.get_clock().now().to_msg()
                 controller_mode.mode = ControllerMode.TRACKING_MODE
                 controller_mode.mpc_active = ControllerMode.MPC_ACTIVE
-                controller_mode.t_start_land = 0
-                controller_mode.z_start_land = 0
+                controller_mode.t_start_land = 0.0
+                controller_mode.z_start_land = 0.0
                 self.controller_mode_publisher.publish(controller_mode)
                 self.latest_mpc_setpoint = None
                 self.latest_mpc_cmd_time = None

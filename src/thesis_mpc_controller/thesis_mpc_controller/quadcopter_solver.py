@@ -1,7 +1,7 @@
 # Adapted from https://github.com/acados/acados/blob/main/examples/acados_python/getting_started/minimal_example_closed_loop.py
 
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver, AcadosSim
-from quadcopter_model import export_quadcopter_ode_model
+from .quadcopter_model import export_quadcopter_ode_model
 import numpy as np
 import scipy.linalg
 
