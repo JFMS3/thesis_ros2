@@ -1,4 +1,4 @@
-/kalman_filter_node:
+/quadcopter_kf:
   ros__parameters:
     R_pos: [
       4.05334208e-09, 4.08163319e-09, 5.91631335e-09,

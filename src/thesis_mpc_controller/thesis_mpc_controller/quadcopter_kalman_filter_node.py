@@ -22,7 +22,7 @@ class QuadcopterKalmanFilterNode(Node):
         self.declare_parameter('max_dt', 0.1)
 
         R_pos_raw = self.get_parameter('R_pos').value
-        R_pos = np.array(R_pos_raw, dtype=float).reshape(3, 3)
+        R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3)
         sigma_accel = [float(v) for v in self.get_parameter('sigma_accel').value]
         P_pos_init = float(self.get_parameter('P_pos_init').value)
         P_vel_init = float(self.get_parameter('P_vel_init').value)
