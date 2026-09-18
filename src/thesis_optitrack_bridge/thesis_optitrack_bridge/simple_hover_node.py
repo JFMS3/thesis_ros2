@@ -33,6 +33,14 @@ class QuadcopterSequence(Enum):
     DONE = auto()
 
 
+class FlightPhase(Enum):
+    FORWARD = auto()
+    BACKWARD = auto()
+    LEFT = auto()
+    RIGHT = auto()
+    DONE = auto()
+
+
 class SimpleHoverNode(Node):
     def __init__(self):
         super().__init__('simple_hover_node')
@@ -54,11 +62,15 @@ class SimpleHoverNode(Node):
         self.rejected_count = 0
         self.consecutive_rejects = 0
 
+        self.flight_phase = FlightPhase.FORWARD
+        self.flight_commanded = False
+        self.FLIGHT_TIME = 5.0
+
         self.declare_parameter('TARGET_HEIGHT', 1.0)
         self.TARGET_HEIGHT = float(self.get_parameter('TARGET_HEIGHT').value)
         self.declare_parameter('MAX_HEIGHT', 2.0)
         self.MAX_HEIGHT = float(self.get_parameter('MAX_HEIGHT').value)
-        self.declare_parameter('HOVER_DURATION', 30.0)
+        self.declare_parameter('HOVER_DURATION', 5.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
         
         self.declare_parameter('HOVER_THRUST', 39000)
@@ -275,24 +287,54 @@ class SimpleHoverNode(Node):
                 self.enter_state(QuadcopterSequence.TAKEOFF)
 
         elif self.sequence == QuadcopterSequence.TAKEOFF:
-            if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
+            if self.time_elapsed() > TAKEOFF_DURATION:
                 self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
                 self.enter_state(QuadcopterSequence.HOVERING)
                     
-                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, 0)
-                self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.HOVER_THRUST)
-
-                # if not self._hover_commanded:
-                #     self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
-                #     self._hover_commanded = True
-                # if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
-                #     self.get_logger().info(f"Just chilling for {self.HOVER_DURATION}s now")
-                #     self.enter_state(QuadcopterSequence.HOVERING)
 
         elif self.sequence == QuadcopterSequence.HOVERING:
-            self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.HOVER_THRUST)
+            if not self._hover_commanded:
+                self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
+                self._hover_commanded = True
 
             if self.time_elapsed() > self.HOVER_DURATION:
+                self.get_logger().info("Transitioning to flight...")
+                self.enter_state(QuadcopterSequence.FLYING)
+
+
+        elif self.sequence == QuadcopterSequence.FLYING:
+            if self.flight_phase == FlightPhase.FORWARD:
+                if not self.flight_commanded:
+                    self.flight_commanded = True
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0]+1, y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLIGHT_TIME-1)
+                if self.time_elapsed() > self.FLIGHT_TIME:
+                    self.flight_phase = FlightPhase.BACKWARD
+                    self.flight_commanded = False
+
+            elif self.flight_phase == FlightPhase.BACKWARD:
+                if not self.flight_commanded:
+                    self.flight_commanded = True
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0]-1, y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLIGHT_TIME-1)
+                if self.time_elapsed() > 2 * self.FLIGHT_TIME:
+                    self.flight_phase = FlightPhase.LEFT
+                    self.flight_commanded = False
+
+            elif self.flight_phase == FlightPhase.LEFT:
+                if not self.flight_commanded:
+                    self.flight_commanded = True
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0]+1, y=self.starting_position[1]+1, z=self.target_z, yaw=0, duration_s=self.FLIGHT_TIME-1)
+                if self.time_elapsed() > 3 * self.FLIGHT_TIME:
+                    self.flight_phase = FlightPhase.RIGHT
+                    self.flight_commanded = False
+
+            elif self.flight_phase == FlightPhase.RIGHT:
+                if not self.flight_commanded:
+                    self.flight_commanded = True
+                    self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=self.FLIGHT_TIME-1)
+                if self.time_elapsed() > 4 * self.FLIGHT_TIME:
+                    self.flight_phase = FlightPhase.DONE
+                    self.flight_commanded = False
+            else:
                 self.cf.commander.send_notify_setpoint_stop()
                 self.get_logger().info(f"Landing...")
                 self.cf.high_level_commander.land(absolute_height_m=self.starting_position[2], duration_s=LAND_DURATION)

@@ -2,7 +2,6 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand
-from .kalman_filter import PositionVelocityKalmanFilter
 from .quadcopter_solver import setup_ocp_solver
 import numpy as np
 from math import isfinite
@@ -37,9 +36,6 @@ class MPCNode(Node):
         Az = float(self.get_parameter('Az').value)
         tau_phi = float(self.get_parameter('tau_phi').value)
         tau_theta = float(self.get_parameter('tau_theta').value)
-
-        self.vel_lpf_alpha = 0.3 # higher = more smoothing, more lag
-        self.vel_filt = np.zeros(3)
         
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -56,18 +52,15 @@ class MPCNode(Node):
         self.mode = ControllerMode.TRACKING_MODE
         self.timer = self.create_timer(self.h, self.control_loop)
 
-        
         self.declare_parameter('TRACK_HEIGHT', 1.0)
         self.TRACK_HEIGHT = float(self.get_parameter('TRACK_HEIGHT').value) # just make drone hover 1m above platform for now
-        self.prev_drone_pos = None # for now not using drone kalman filter
+        self.prev_drone_pos = None
         self.prev_drone_stamp = None
-        
-
         self.mpc_enabled = False
 
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
-            '/measured_quadcopter_state',
+            '/full_quadcopter_state',
             self.quadcopter_callback,
             qos
         )
@@ -107,20 +100,8 @@ class MPCNode(Node):
 
     def quadcopter_callback(self, msg: QuadcopterState):
         pos = np.array(msg.position, dtype=float)
+        vel = np.array(msg.velocity, dtype=float)
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-
-        if self.prev_drone_pos is None:
-            vel_raw = np.zeros(3)
-        else:
-            dt = stamp - self.prev_drone_stamp
-
-            if 0.0 < dt <= 0.1:
-                vel_raw = (pos - self.prev_drone_pos) / dt
-            else:
-                vel_raw = np.zeros(3)
-
-        self.vel_filt = self.vel_lpf_alpha * vel_raw + (1-self.vel_lpf_alpha) * self.vel_filt
-        vel = self.vel_filt
 
         self.x_hat = np.array([
             pos[0], pos[1], pos[2],

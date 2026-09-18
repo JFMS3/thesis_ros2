@@ -21,9 +21,7 @@ def generate_launch_description():
         description='Hover thrust for crazyflie'
     )
 
-    run_name = datetime.now().strftime(
-        "velocity_kf_estimation_%m-%d_%H-%M"
-    )
+    run_name = datetime.now().strftime("velocity_kf_estimation_%m-%d_%H-%M")
     log_dir = str(Path.home() / "thesis_logs" / run_name)
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 

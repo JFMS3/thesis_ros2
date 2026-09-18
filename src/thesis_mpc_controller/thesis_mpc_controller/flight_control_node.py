@@ -108,7 +108,11 @@ class FlightControlNode(Node):
             MPCCommand, '/mpc_cmd', self.mpc_cmd_callback, 10
         )
 
-        log_dir = Path.home() / "preliminary_mpc_logs"
+        self.declare_parameter('log_dir', '')
+        log_dir = self.get_parameter('log_dir').value
+        if log_dir: log_dir = Path(log_dir)
+        else: log_dir = Path('log')
+
         log_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = log_dir / f"flight_control_{timestamp}.csv"

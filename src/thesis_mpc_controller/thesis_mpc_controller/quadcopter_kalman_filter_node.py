@@ -7,6 +7,7 @@ from .kalman_filter import PositionVelocityKalmanFilter
 import numpy as np
 import csv
 from pathlib import Path
+from datetime import datetime
 
 class QuadcopterKalmanFilterNode(Node):
     """Subscribes to quadcopter_state topic, publishes velocity estimates"""
@@ -14,15 +15,21 @@ class QuadcopterKalmanFilterNode(Node):
         super().__init__('quadcopter_kalman_filter')
         state_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
                 
-        self.declare_parameter('R_pos', [1.0] * 9) 
-        self.declare_parameter('sigma_accel', [0.1, 0.1, 0.1])
-        self.declare_parameter('P_pos_init', 0.1)
+        self.declare_parameter('R_pos', [
+            4.05334208e-09, 4.08163319e-09, 5.91631335e-09,
+            4.08163319e-09, 5.55542538e-09, 5.95189493e-09,
+            5.91631335e-09, 5.95189493e-09, 8.73493455e-09
+        ]) 
+        self.declare_parameter('sigma_accel', [0.09621782, 0.1114207, 0.0656136])
+        self.declare_parameter('P_pos_init', 0.001)
         self.declare_parameter('P_vel_init', 0.1)
         self.declare_parameter('nis_threshold', 11.34)
         self.declare_parameter('max_dt', 0.1)
 
+        R_pos_scalar = 10
         R_pos_raw = self.get_parameter('R_pos').value
-        R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3)
+        R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3) * R_pos_scalar # measured R_pos seems way too small
+        R_pos = R_pos * np.eye(3) # taking diagonal elements for now seems coupled axes not helping
         sigma_accel = [float(v) for v in self.get_parameter('sigma_accel').value]
         P_pos_init = float(self.get_parameter('P_pos_init').value)
         P_vel_init = float(self.get_parameter('P_vel_init').value)
@@ -48,12 +55,14 @@ class QuadcopterKalmanFilterNode(Node):
         if log_dir:
             log_dir = Path(log_dir)
         else:
-            log_dir = Path('log')
+            log_dir = Path(f'log/{datetime.now().strftime("velocity_kf_%m-%d_%H-%M")}')
         log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f'quadcopter_kalman_filter.csv'
 
         self.kf_log_file = open(
-            log_dir / 'kalman_filter.csv', 'w', newline='', buffering=1
+            log_path, 'w', newline='', buffering=1
         )
+        self.get_logger().info(f"Saved csv to {log_path}")
         self.kf_csv_writer = csv.writer(self.kf_log_file)
         self.kf_csv_writer.writerow([
             't', 'dt', 'measured_x', 'measured_y', 'measured_z',
@@ -76,7 +85,7 @@ class QuadcopterKalmanFilterNode(Node):
             return
 
         self.kf.predict(dt)
-        nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold)
+        nis, ok = self.kf.update(msg.position, nis_threshold=None)# previously self.nis_threshold
         
         if not ok:
             self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...")
