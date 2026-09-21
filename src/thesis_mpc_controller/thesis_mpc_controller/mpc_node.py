@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand
+from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand, PlatformPrediction
 from .quadcopter_solver import setup_ocp_solver
 import numpy as np
 from math import isfinite
@@ -14,7 +14,7 @@ class MPCNode(Node):
     def __init__(self):
         super().__init__('mpc_node')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
-        mpc_active_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        reliable_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         
         self.declare_parameter('fs', 20)
         self.fs = self.get_parameter('fs').value
@@ -57,6 +57,7 @@ class MPCNode(Node):
         self.prev_drone_pos = None
         self.prev_drone_stamp = None
         self.mpc_enabled = False
+        self.platform_prediction = None
 
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
@@ -72,15 +73,23 @@ class MPCNode(Node):
             qos
         )
 
-        self.cmd_publisher = self.create_publisher(
-            MPCCommand, '/mpc_cmd', 10
+        self.platform_prediction_subscription = self.create_subscription(
+            PlatformPrediction,
+            '/platform_prediction',
+            self.platform_prediction_callback,
+            reliable_qos
         )
 
         self.controller_mode_subscription = self.create_subscription(
             ControllerMode,
             '/controller_mode',
             self.controller_mode_callback,
-            mpc_active_qos
+            reliable_qos
+        )
+
+
+        self.cmd_publisher = self.create_publisher(
+            MPCCommand, '/mpc_cmd', 10
         )
 
         log_dir = Path.home() / "preliminary_mpc_logs"
@@ -116,6 +125,31 @@ class MPCNode(Node):
         self.platform_pos = np.array(msg.position, dtype=float)
         self.platform_vel = np.array(msg.velocity, dtype=float)
 
+    def platform_prediction_callback(self, msg):
+        self.platform_prediction = msg
+
+
+    def get_platform_prediction(self):
+        refs = np.zeros((self.N_horizon + 1, self.nx))
+
+        if self.platform_prediction is None or self.x_hat is None:
+            self.get_logger().warn("Waiting for quadcopter state and platform prediction", throttle_duration_sec=2)
+            return refs
+
+        N = min(self.N_horizon + 1, len(self.platform_prediction.x))
+        for i in range(N):
+            refs[i, 0] = self.platform_prediction.x[i]
+            refs[i, 1] = self.platform_prediction.y[i]
+            refs[i, 2] = self.platform_prediction.z[i] + self.TRACK_HEIGHT
+            refs[i, 3] = self.platform_prediction.vx[i]
+            refs[i, 4] = self.platform_prediction.vy[i]
+            refs[i, 5] = self.platform_prediction.vz[i]
+
+        for i in range(N, self.N_horizon + 1):
+            refs[i, :] = refs[N-1, :] # bit of padding if horizons dont match
+
+        return refs
+
 
     def controller_mode_callback(self, msg):
         was_enabled = self.mpc_enabled
@@ -130,10 +164,8 @@ class MPCNode(Node):
         if not self.mpc_enabled:
             return
         
-        if self.platform_pos is None or self.platform_vel is None or self.x_hat is None: 
-            self.get_logger().warn(
-                "Waiting for state estimate and platform state", throttle_duration_sec=2
-            )
+        if self.platform_prediction is None or self.x_hat is None: 
+            self.get_logger().warn("Waiting for state estimate and platform state", throttle_duration_sec=2)
             return
 
         quadcopter_state_age = self.get_clock().now().nanoseconds * 1e-9 - self.prev_drone_stamp
@@ -141,7 +173,7 @@ class MPCNode(Node):
             self.get_logger().warn(f"Haven't received valid quadcopter state for {quadcopter_state_age:.2f}s, not solving MPC", throttle_duration_sec=1.0)
             return
 
-        refs = self.get_platform_preview()
+        refs = self.get_platform_prediction()
 
         for k in range(self.N_horizon):
             yref_k = np.concatenate([refs[k, :], np.zeros(self.nu)])
@@ -172,20 +204,6 @@ class MPCNode(Node):
             return
         self.cmd_publisher.publish(cmd)
 
-
-        
-    def get_platform_preview(self):
-        refs = np.zeros((self.N_horizon + 1, self.nx))
-        for i in range(self.N_horizon + 1):
-            tau = i * self.h
-            p_pred = self.platform_pos # assumes stationary platform
-            #p_pred = self.platform_pos + self.platform_vel * tau
-
-            refs[i, 0] = p_pred[0]
-            refs[i, 1] = p_pred[1]
-            refs[i, 2] = p_pred[2] + self.TRACK_HEIGHT
-
-        return refs
 
 
 def main(args=None):

@@ -45,6 +45,14 @@ def generate_launch_description():
         }]
     )
 
+    platform_controller_node = Node(
+            package=platform_package_name,
+            executable='platform_controller',
+            name='platform_controller',
+            output='screen',
+            parameters=[platform_yaml_path]
+        )
+    
     platform_kalman_filter_node = Node(
         package=platform_package_name,
         executable='platform_kf',
@@ -67,5 +75,6 @@ def generate_launch_description():
         mpc_node,
         flight_control_node,
         platform_kalman_filter_node,
+        platform_controller_node,
         quadcopter_kalman_filter_node
     ])

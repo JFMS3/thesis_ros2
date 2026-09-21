@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from thesis_interfaces.msg import PlatformState
+from thesis_interfaces.msg import PlatformState, PlatformPrediction
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import TwistStamped
 import math
@@ -12,9 +12,10 @@ class PlatformController(Node):
         cmd_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         state_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
-        self.publisher = self.create_publisher(TwistStamped, '/cmd_vel', cmd_qos)
+        self.cmd_publisher = self.create_publisher(TwistStamped, '/cmd_vel', cmd_qos)
         self.subcriber = self.create_subscription(PlatformState, '/measured_platform_state', self.state_callback, state_qos)
         self.timer = self.create_timer(0.05, self.simple_circle_path)
+        self.pred_publisher = self.create_publisher(PlatformPrediction, '/platform_prediction', cmd_qos)
 
         self.centre = None
         self.starting_xs = []
@@ -23,6 +24,8 @@ class PlatformController(Node):
         self.off_r = 0.0
         self.off_t = 0.0
         self.alpha = 0.02
+        self.pred_dt = 0.05
+        self.pred_N = 40
 
         # actuator limits
         self.MAX_V = 0.3
@@ -35,7 +38,6 @@ class PlatformController(Node):
         self.omega = min(self.MAX_W, self.linear_speed / self.radius)
 
         self.model_radius = self.radius # what the model thinks the radius is
-
         self.refit_points = [] # once bot has driven a decent arc, fit circle to measured positions
         self.refit_done = False
         self.REFIT_AFTER = 5.0
@@ -80,7 +82,6 @@ class PlatformController(Node):
         
 
     def refit_circle(self):
-
         arr = np.array(self.refit_points, dtype=float)
         ts, xs, ys = arr[:, 0], arr[:, 1], arr[:, 2]
 
@@ -113,18 +114,19 @@ class PlatformController(Node):
             prev_pose = self.pose
             x = float(msg.position[0])
             y = float(msg.position[1])
+            z = float(msg.position[2])
             yaw = -float(msg.attitude[2])
             if math.isnan(x) or math.isnan(y) or math.isnan(yaw):
                 return
 
             if prev_pose is not None:
-                prev_yaw = prev_pose[2]
+                prev_yaw = prev_pose[3]
                 yaw_diff = math.atan2(math.sin(yaw-prev_yaw), math.cos(yaw-prev_yaw))
                 if abs(yaw_diff) > self.YAW_JUMP_LIMIT:
                     self.get_logger().warn(f"Ignored large yaw jump: {math.degrees(yaw_diff):.1f} deg")
                     return
                 
-            self.pose = (x, y, yaw)
+            self.pose = (x, y, z, yaw)
             self.last_pose_time = self.get_clock().now()
 
             if self.centre is None:
@@ -153,7 +155,8 @@ class PlatformController(Node):
       
     def pose_age(self):
         # seconds since last accepted mocap measurement
-        if self.last_pose_time is None: return float('inf')
+        if self.last_pose_time is None: 
+            return float('inf')
         return (self.get_clock().now() - self.last_pose_time).nanoseconds * 1e-9
 
 
@@ -170,14 +173,56 @@ class PlatformController(Node):
         cmd.header.frame_id = 'base_link'
         cmd.twist.linear.x = float(self.linear_speed)
         cmd.twist.angular.z = float(self.omega)
-        self.publisher.publish(cmd)
+        self.cmd_publisher.publish(cmd)
 
         lookahead = 2.0
         pred_x, pred_y = self.predict_at(delta_t + lookahead)
         nx, ny = self.nominal_at(delta_t)
         age = self.pose_age()
+        self.publish_prediction()
 
         self.get_logger().info(f"Current: ({self.pose[0]:.3f}, {self.pose[1]:.3f}) | Expected: ({nx:.3f}, {ny:.3f}) | Offset: r={self.off_r:.3f}, t={self.off_t:.3f} | Predicted: ({pred_x:.3f}, {pred_y:.3f}) | age={age:.2f}s")
+
+
+    def publish_prediction(self):
+        if self.centre is None or self.pose is None or self.start_time is None:
+            return
+
+        msg = PlatformPrediction()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.dt = self.pred_dt
+        msg.N = self.pred_N
+
+        now = (self.get_clock().now()- self.start_time).nanoseconds * 1e-9
+        zs = [self.pose[2]] * (self.pred_N + 1)
+        vzs = [0.0] * (self.pred_N + 1)
+
+        xs, ys, vxs, vys = [], [], [], []
+        r = self.model_radius + self.off_r
+        delta_phi = self.off_t / self.model_radius
+
+        for i in range(self.pred_N + 1):
+            tau = i * self.pred_dt
+            t = now + tau
+
+            phi = self.omega * t + self.yaw_offset + delta_phi
+            x = self.centre[0] + r * math.cos(phi)
+            y = self.centre[1] + r * math.sin(phi)
+            vx = -r * self.omega * math.sin(phi)
+            vy = -r * self.omega * math.cos(phi)
+            xs.append(x)
+            ys.append(y)
+            vxs.append(vx)
+            vys.append(vy)
+
+        msg.x = xs
+        msg.y = ys
+        msg.z = zs
+        msg.vx = vxs
+        msg.vy = vys
+        msg.vz = vzs
+        self.pred_publisher.publish(msg)
+
 
 
 def main(args=None):
