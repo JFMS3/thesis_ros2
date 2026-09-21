@@ -30,6 +30,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MPCCommand.msg"
   "msg/PlatformState.msg"
   "msg/QuadcopterState.msg"
+  "msg/PlatformPrediction.msg"
   "srv/SetMode.srv"
   DEPENDENCIES geometry_msgs
 )

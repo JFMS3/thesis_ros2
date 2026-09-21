@@ -19,7 +19,7 @@ def setup_ocp_solver(x0, N_horizon, Tf, Ax, Ay, Az, tau_phi, tau_theta, m):
     ocp.cost.cost_type = 'LINEAR_LS'
     ocp.cost.cost_type_e = 'LINEAR_LS'
     
-    Q_mat = np.diag([5, 5, 5, 0, 0, 0, 0, 0])
+    Q_mat = np.diag([5, 5, 5, 1, 1, 1, 0, 0])
     R_mat = np.diag([0.1, 0.1, 0.1])
 
     ocp.cost.W = scipy.linalg.block_diag(Q_mat, R_mat)
@@ -33,8 +33,8 @@ def setup_ocp_solver(x0, N_horizon, Tf, Ax, Ay, Az, tau_phi, tau_theta, m):
     ocp.cost.yref_e = np.zeros((ny_e,))
 
     # constraints
-    phi_max = np.deg2rad(15)
-    theta_max = np.deg2rad(15)
+    phi_max = np.deg2rad(5)
+    theta_max = np.deg2rad(5)
     Tdev_max = 0.05
 
     ocp.constraints.idxbu = np.array([0, 1, 2])

@@ -58,7 +58,9 @@ def generate_launch_description():
         executable='platform_kf',
         name='platform_kalman_filter',
         output='screen',
-        parameters=[platform_yaml_path]
+        parameters=[platform_yaml_path, {
+            'log_dir': log_dir
+        }]
     )
 
     quadcopter_kalman_filter_node = Node(

@@ -1,7 +1,6 @@
 std_msgs/Header header
 float64 dt
-uint32 N
-
+uint32 n
 float64[] x
 float64[] y
 float64[] z

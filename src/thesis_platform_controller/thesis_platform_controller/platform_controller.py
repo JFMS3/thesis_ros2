@@ -181,7 +181,7 @@ class PlatformController(Node):
         age = self.pose_age()
         self.publish_prediction()
 
-        self.get_logger().info(f"Current: ({self.pose[0]:.3f}, {self.pose[1]:.3f}) | Expected: ({nx:.3f}, {ny:.3f}) | Offset: r={self.off_r:.3f}, t={self.off_t:.3f} | Predicted: ({pred_x:.3f}, {pred_y:.3f}) | age={age:.2f}s")
+        # self.get_logger().info(f"Current: ({self.pose[0]:.3f}, {self.pose[1]:.3f}) | Expected: ({nx:.3f}, {ny:.3f}) | Offset: r={self.off_r:.3f}, t={self.off_t:.3f} | Predicted: ({pred_x:.3f}, {pred_y:.3f}) | age={age:.2f}s")
 
 
     def publish_prediction(self):
@@ -191,7 +191,7 @@ class PlatformController(Node):
         msg = PlatformPrediction()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.dt = self.pred_dt
-        msg.N = self.pred_N
+        msg.n = self.pred_N
 
         now = (self.get_clock().now()- self.start_time).nanoseconds * 1e-9
         zs = [self.pose[2]] * (self.pred_N + 1)
