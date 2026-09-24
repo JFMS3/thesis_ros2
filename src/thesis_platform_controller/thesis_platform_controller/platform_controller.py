@@ -123,7 +123,7 @@ class PlatformController(Node):
                 prev_yaw = prev_pose[3]
                 yaw_diff = math.atan2(math.sin(yaw-prev_yaw), math.cos(yaw-prev_yaw))
                 if abs(yaw_diff) > self.YAW_JUMP_LIMIT:
-                    self.get_logger().warn(f"Ignored large yaw jump: {math.degrees(yaw_diff):.1f} deg")
+                    self.get_logger().warn(f"Ignored large yaw jump: {math.degrees(yaw_diff):.1f} deg", throttle_duration_sec=2)
                     return
                 
             self.pose = (x, y, z, yaw)

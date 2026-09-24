@@ -16,6 +16,9 @@ class MPCNode(Node):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
         reliable_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         
+        self.declare_parameter('reference_preview_enabled', True)
+        self.reference_preview_enabled = self.get_parameter('reference_preview_enabled').value
+
         self.declare_parameter('fs', 20)
         self.fs = self.get_parameter('fs').value
         self.declare_parameter('N_horizon', 40)
@@ -87,7 +90,6 @@ class MPCNode(Node):
             reliable_qos
         )
 
-
         self.cmd_publisher = self.create_publisher(
             MPCCommand, '/mpc_cmd', 10
         )
@@ -104,6 +106,8 @@ class MPCNode(Node):
             "phi", "theta", "ref_x", "ref_y", "ref_z",
             "phi_cmd", "theta_cmd", "thrust_dev", "solver_status",
         ])
+
+        self.get_logger().info(f"MPC node has begun! Reference preview {'enabled' if self.reference_preview_enabled else 'disabled'}")
         self.get_logger().info(f"Logging MPC data to {log_path}")
 
 
@@ -132,21 +136,36 @@ class MPCNode(Node):
     def get_platform_prediction(self):
         refs = np.zeros((self.N_horizon + 1, self.nx))
 
-        if self.platform_prediction is None or self.x_hat is None:
-            self.get_logger().warn("Waiting for quadcopter state and platform prediction", throttle_duration_sec=2)
+        if self.x_hat is None:
+            self.get_logger().warn("Waiting for quadcopter state", throttle_duration_sec=2)
             return refs
 
-        N = min(self.N_horizon + 1, len(self.platform_prediction.x))
-        for i in range(N):
-            refs[i, 0] = self.platform_prediction.x[i]
-            refs[i, 1] = self.platform_prediction.y[i]
-            refs[i, 2] = self.platform_prediction.z[i] + self.TRACK_HEIGHT
-            refs[i, 3] = self.platform_prediction.vx[i]
-            refs[i, 4] = self.platform_prediction.vy[i]
-            refs[i, 5] = self.platform_prediction.vz[i]
+        if self.reference_preview_enabled:
+            if self.platform_prediction is None:
+                self.get_logger().warn("Waiting for platform prediction", throttle_duration_sec=2)
+                return refs
+            
+            N = min(self.N_horizon + 1, len(self.platform_prediction.x))
+            for i in range(N):
+                refs[i, 0] = self.platform_prediction.x[i]
+                refs[i, 1] = self.platform_prediction.y[i]
+                refs[i, 2] = self.platform_prediction.z[i] + self.TRACK_HEIGHT
+                refs[i, 3] = self.platform_prediction.vx[i]
+                refs[i, 4] = self.platform_prediction.vy[i]
+                refs[i, 5] = self.platform_prediction.vz[i]
 
-        for i in range(N, self.N_horizon + 1):
-            refs[i, :] = refs[N-1, :] # bit of padding if horizons dont match
+            for i in range(N, self.N_horizon + 1):
+                refs[i, :] = refs[N-1, :] # bit of padding if horizons dont match
+        else:
+            x, y, z = self.platform_pos
+            vx, vy, vz = self.platform_vel
+            for i in range(self.N_horizon + 1):       
+                refs[i, 0] = x + vx * i * self.h
+                refs[i, 1] = y + vy * i * self.h
+                refs[i, 2] = z + self.TRACK_HEIGHT
+                refs[i, 3] = vx
+                refs[i, 4] = vy
+                refs[i, 5] = vz
 
         return refs
 

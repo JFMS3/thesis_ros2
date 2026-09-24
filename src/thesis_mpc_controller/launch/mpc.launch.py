@@ -27,12 +27,22 @@ def generate_launch_description():
         'matrix_params.yaml'
     )
 
+    declare_reference_preview = DeclareLaunchArgument(
+        'reference_preview_enabled',
+        default_value='true',
+        description='true if platform reference preview is enabled, false otherwise.'
+    )
+    reference_preview_enabled = LaunchConfiguration('reference_preview_enabled')
+
+
     mpc_node = Node(
         package=mpc_package_name,
         executable='mpc_node',
         name='mpc_node',
         output='screen',
-        parameters=[mpc_yaml_path]
+        parameters=[mpc_yaml_path, {
+            'reference_preview_enabled': reference_preview_enabled
+        }]
     )
 
     flight_control_node = Node(
@@ -74,6 +84,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        declare_reference_preview,
+
         mpc_node,
         flight_control_node,
         platform_kalman_filter_node,
