@@ -6,5 +6,6 @@ uint8 MPC_ACTIVE = 1
 
 uint8 mode
 uint8 mpc_active
+uint8 finish_sequence
 float64 t_start_land
 float64 z_start_land

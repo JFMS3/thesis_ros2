@@ -104,6 +104,13 @@ class FlightControlNode(Node):
             ControllerMode, '/controller_mode', mpc_active_qos
         )
 
+        self.controller_mode_subscription = self.create_subscription(
+            ControllerMode,
+            '/controller_mode',
+            self.controller_mode_callback,
+            mpc_active_qos
+        )
+
         self.mpc_cmd_subscription = self.create_subscription(
             MPCCommand, '/mpc_cmd', self.mpc_cmd_callback, 10
         )
@@ -228,6 +235,11 @@ class FlightControlNode(Node):
         self.latest_mpc_cmd_time = self.get_clock().now()
 
 
+    def controller_mode_callback(self, msg):
+        if self.sequence == QuadcopterSequence.MPC_ACTIVE and msg.finish_sequence:
+            self.enter_state(QuadcopterSequence.LANDING)
+
+
     def check_safety_violation(self):
         if self.last_valid_pos is None:
             return "No valid quadcopter position"
@@ -275,6 +287,7 @@ class FlightControlNode(Node):
         controller_mode.header.stamp = self.get_clock().now().to_msg()
         controller_mode.mode = ControllerMode.TRACKING_MODE
         controller_mode.mpc_active = ControllerMode.MPC_INACTIVE
+        controller_mode.finish_sequence = 0
         controller_mode.t_start_land = 0.0
         controller_mode.z_start_land = 0.0
         self.controller_mode_publisher.publish(controller_mode)
@@ -355,6 +368,7 @@ class FlightControlNode(Node):
                 controller_mode.header.stamp = self.get_clock().now().to_msg()
                 controller_mode.mode = ControllerMode.TRACKING_MODE
                 controller_mode.mpc_active = ControllerMode.MPC_ACTIVE
+                controller_mode.finish_sequence = 0
                 controller_mode.t_start_land = 0.0
                 controller_mode.z_start_land = 0.0
                 self.controller_mode_publisher.publish(controller_mode)
@@ -400,11 +414,10 @@ class FlightControlNode(Node):
             
 
         elif self.sequence == QuadcopterSequence.LANDING:
-            if self.time_elapsed() > LAND_DURATION + 0.5:
-                self.cf.high_level_commander.stop()
-                self.get_logger().info(f"Landed")
-                self.enter_state(QuadcopterSequence.DONE)
-                self.timer.cancel()
+            self.cf.high_level_commander.stop()
+            self.get_logger().info(f"Landed")
+            self.enter_state(QuadcopterSequence.DONE)
+            self.timer.cancel()
         elif self.sequence == QuadcopterSequence.DONE:
             pass
 
