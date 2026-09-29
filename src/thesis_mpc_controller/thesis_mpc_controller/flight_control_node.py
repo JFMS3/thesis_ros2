@@ -394,6 +394,9 @@ class FlightControlNode(Node):
             #normal mpc operation
             phi, theta, yaw_rate, thrust = self.latest_mpc_setpoint
             self.cf.commander.send_setpoint(phi, theta, yaw_rate, thrust)
+            self.last_sent_phi = phi
+            self.last_sent_theta = theta
+            self.last_sent_thrust = thrust
             
 
         elif self.sequence == QuadcopterSequence.LANDING:

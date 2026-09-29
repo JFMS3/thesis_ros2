@@ -1,16 +1,10 @@
+# adapted from https://filterpy.readthedocs.io/en/latest/kalman/KalmanFilter.html
+
 import numpy as np
 from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 
 class PositionVelocityKalmanFilter:
-    """
-    Uses Filterpy's KalmanFilter class to predict the position and velocity of the drone.
-    Args:
-        R_pos_diag: measurement noise covariance
-        sigma_accel: per-axis standard deviation of the acceleration ignored by the drone model
-        P_pos_init: initial position state covariance (how much initial position is trusted)
-        P_vel_init: initial velocity state covariance (how much initial velocity is trusted)
-    """
     def __init__(self, R_pos, sigma_accel, P_pos_init, P_vel_init, max_dt=0.1):
         self.sigma_accel = np.asarray(sigma_accel, float)
         self.kf = KalmanFilter(dim_x=6, dim_z=3)

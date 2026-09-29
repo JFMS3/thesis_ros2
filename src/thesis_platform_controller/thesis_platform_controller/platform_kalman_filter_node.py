@@ -21,7 +21,7 @@ class PlatformKalmanFilterNode(Node):
         self.declare_parameter('sigma_accel', [0.1, 0.1, 0.1])
         self.declare_parameter('P_pos_init', 0.1)
         self.declare_parameter('P_vel_init', 0.1)
-        self.declare_parameter('nis_threshold', 11.34)
+        self.declare_parameter('nis_threshold', 16)
         self.declare_parameter('max_dt', 0.1)
 
         R_pos_raw = self.get_parameter('R_pos').value
@@ -82,7 +82,7 @@ class PlatformKalmanFilterNode(Node):
             return
 
         self.kf.predict(dt)
-        nis, ok = self.kf.update(msg.position, nis_threshold=None) # disabling self.nis_threshold
+        nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold) # disabling self.nis_threshold
         if not ok:
             self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...", throttle_duration_sec=1.0)
 

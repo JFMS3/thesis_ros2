@@ -5,5 +5,5 @@
     sigma_accel: [0.2, 0.2, 0.2]
     P_pos_init: 0.001
     P_vel_init: 0.1
-    nis_threshold: 11.34
+    nis_threshold: 16
     max_dt: 0.1

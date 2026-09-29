@@ -23,10 +23,11 @@ class QuadcopterKalmanFilterNode(Node):
         self.declare_parameter('sigma_accel', [0.09621782, 0.1114207, 0.0656136])
         self.declare_parameter('P_pos_init', 0.001)
         self.declare_parameter('P_vel_init', 0.1)
-        self.declare_parameter('nis_threshold', 11.34)
+        self.declare_parameter('nis_threshold', 16)
         self.declare_parameter('max_dt', 0.1)
+        self.declare_parameter('R_pos_scalar', 100)
 
-        R_pos_scalar = 10
+        R_pos_scalar = float(self.get_parameter('R_pos_scalar').value)
         R_pos_raw = self.get_parameter('R_pos').value
         R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3) * R_pos_scalar # measured R_pos seems way too small
         R_pos = R_pos * np.eye(3) # taking diagonal elements for now seems coupled axes not helping

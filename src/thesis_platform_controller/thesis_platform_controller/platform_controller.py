@@ -209,7 +209,7 @@ class PlatformController(Node):
             x = self.centre[0] + r * math.cos(phi)
             y = self.centre[1] + r * math.sin(phi)
             vx = -r * self.omega * math.sin(phi)
-            vy = -r * self.omega * math.cos(phi)
+            vy = r * self.omega * math.cos(phi)
             xs.append(x)
             ys.append(y)
             vxs.append(vx)

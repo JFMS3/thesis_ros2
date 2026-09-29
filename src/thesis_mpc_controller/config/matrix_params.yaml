@@ -12,8 +12,9 @@
     sigma_accel: [0.6, 0.45, 0.6] #[0.09621782, 0.1114207, 0.0656136]
     P_pos_init: 0.001
     P_vel_init: 0.1
-    nis_threshold: 11.34
+    nis_threshold: 16
     max_dt: 0.1
+    R_pos_scalar: 100
 
 /mpc_node:
   ros__parameters:

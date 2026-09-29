@@ -19,7 +19,7 @@ def setup_ocp_solver(x0, N_horizon, Tf, Ax, Ay, Az, tau_phi, tau_theta, m):
     ocp.cost.cost_type = 'LINEAR_LS'
     ocp.cost.cost_type_e = 'LINEAR_LS'
     
-    Q_mat = np.diag([5, 5, 5, 2, 2, 2, 0, 0])
+    Q_mat = np.diag([5, 5, 5, 3, 3, 3, 0, 0])
     R_mat = np.diag([0.1, 0.1, 0.1])
 
     ocp.cost.W = scipy.linalg.block_diag(Q_mat, R_mat)
