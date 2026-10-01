@@ -32,6 +32,7 @@ class QuadcopterSequence(Enum):
     HANDOVER = auto()
     MPC_ACTIVE = auto()
     LANDING = auto()
+    EMERGENCY_LANDING = auto()
     DONE = auto()
 
 
@@ -296,8 +297,7 @@ class FlightControlNode(Node):
             self.cf.commander.send_notify_setpoint_stop()
             land_height = self.starting_position[2] if self.starting_position else 0.0
             self.cf.high_level_commander.land(absolute_height_m=land_height, duration_s=LAND_DURATION)
-            self.enter_state(QuadcopterSequence.LANDING)
-            self.get_logger().warn("Emergency landing complete")
+            self.enter_state(QuadcopterSequence.EMERGENCY_LANDING)
         except Exception as e:
             self.get_logger().error(f"Failed to emergency land {e}")
     
@@ -414,11 +414,20 @@ class FlightControlNode(Node):
             
 
         elif self.sequence == QuadcopterSequence.LANDING:
-            self.cf.high_level_commander.stop()
+            self.cf.commander.send_stop_setpoint()
             self.get_logger().info(f"Landed")
             self.enter_state(QuadcopterSequence.DONE)
             self.timer.cancel()
+
+        elif self.sequence == QuadcopterSequence.EMERGENCY_LANDING:
+            if self.time_elapsed() > LAND_DURATION + 0.5:
+                self.cf.high_level_commander.stop()
+                self.enter_state(QuadcopterSequence.DONE)
+                self.timer.cancel()
+                self.get_logger().warn("Emergency landing complete")
+
         elif self.sequence == QuadcopterSequence.DONE:
+            self.get_logger().info("Done!")
             pass
 
 

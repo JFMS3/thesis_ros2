@@ -83,8 +83,8 @@ class PlatformKalmanFilterNode(Node):
 
         self.kf.predict(dt)
         nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold) # disabling self.nis_threshold
-        if not ok:
-            self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...", throttle_duration_sec=1.0)
+        # if not ok:
+        #     self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...", throttle_duration_sec=1.0)
 
         observed_state = PlatformState()
         observed_state.header = msg.header

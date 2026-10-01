@@ -88,8 +88,8 @@ class QuadcopterKalmanFilterNode(Node):
         self.kf.predict(dt)
         nis, ok = self.kf.update(msg.position, nis_threshold=None)# previously self.nis_threshold
         
-        if not ok:
-            self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...")
+        # if not ok:
+        #     self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...")
 
         observed_state = QuadcopterState()
         observed_state.header = msg.header

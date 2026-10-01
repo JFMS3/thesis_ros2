@@ -67,13 +67,13 @@ class MPCNode(Node):
         self.mpc_enabled = False
         self.platform_prediction = None
 
-        self.declare_parameter('ENTER_LANDING_POS_THRESHOLD', 0.2) # position error to enter landing mode
+        self.declare_parameter('ENTER_LANDING_POS_THRESHOLD', 0.3) # position error to enter landing mode
         self.ENTER_LANDING_POS_THRESHOLD = float(self.get_parameter('ENTER_LANDING_POS_THRESHOLD').value)
         self.declare_parameter('ENTER_LANDING_SAMPLE_THRESHOLD', 10) # need 10 samples < pos error before entering landing
         self.ENTER_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('ENTER_LANDING_SAMPLE_THRESHOLD').value)
         self.enter_landing_sample_count = 0
 
-        self.declare_parameter('EXIT_LANDING_POS_THRESHOLD', 0.4) # position error to leave landing mode
+        self.declare_parameter('EXIT_LANDING_POS_THRESHOLD', 0.45) # position error to leave landing mode
         self.EXIT_LANDING_POS_THRESHOLD = float(self.get_parameter('EXIT_LANDING_POS_THRESHOLD').value)
         self.declare_parameter('EXIT_LANDING_SAMPLE_THRESHOLD', 20) # need 20 samples > pos error to exit landing
         self.EXIT_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('EXIT_LANDING_SAMPLE_THRESHOLD').value)
@@ -83,6 +83,7 @@ class MPCNode(Node):
         self.mpc_mode = MPC_MODE.TRACKING
         self.t_start_land = 0
         self.z_start_land = 0
+        self.landing_pad_offset = 0.15
         
 
         self.quadcopter_subscription = self.create_subscription(
@@ -161,8 +162,8 @@ class MPCNode(Node):
         self.platform_prediction = msg
 
 
-    def get_landing_coords(self, x, y, vx, vy):
-        offset = 0.2 # landing pad actually 20cm in front of mocap
+    def get_landing_xy(self, x, y, vx, vy):
+        offset = self.landing_pad_offset
         speed = sqrt(vx**2 + vy**2)
         dir_x = vx/speed
         dir_y = vy/speed
@@ -186,7 +187,7 @@ class MPCNode(Node):
             for i in range(N):
                 vx = self.platform_prediction.vx[i]
                 vy = self.platform_prediction.vy[i]
-                ref_x, ref_y = self.get_landing_coords(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy)
+                ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy)
 
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
@@ -220,18 +221,21 @@ class MPCNode(Node):
             self.mpc_enabled_at = self.get_clock().now()
 
 
-    def get_pos_error(self, include_z=False):
-        quadcopter_x, quadcopter_y, quadcopter_z = self.quadcopter_pos
-        platform_x, platform_y, platform_z = self.platform_pos
+    def get_xy_error(self):
+        quadcopter_x, quadcopter_y, _ = self.quadcopter_pos
+        platform_x, platform_y, _ = self.platform_pos
 
         error = (quadcopter_x - platform_x) ** 2 + (quadcopter_y - platform_y) ** 2
-        if include_z:
-            error += (quadcopter_z - platform_z) ** 2
-        return sqrt(error)
+        return sqrt(error) - self.landing_pad_offset
+
+    def get_z_error(self):
+        _, _, quadcopter_z = self.quadcopter_pos
+        _, _, platform_z = self.platform_pos
+        return sqrt((quadcopter_z - platform_z) ** 2)
 
 
     def set_tracking_mode(self):
-        xy_error = self.get_pos_error(include_z=False)
+        xy_error = self.get_xy_error()
 
         if self.mpc_mode == MPC_MODE.TRACKING:
             if xy_error < self.ENTER_LANDING_POS_THRESHOLD:
@@ -285,8 +289,9 @@ class MPCNode(Node):
             return
 
         
-        xyz_error = self.get_pos_error(include_z=True)
-        if xyz_error < self.LAND_ERROR_THRESHOLD:
+        xy_error = self.get_xy_error()
+        z_error = self.get_z_error()
+        if xy_error < self.LAND_ERROR_THRESHOLD and z_error < 0.1:
             self.get_logger().info(f"Sufficiently close to platform, cutting power!")
             controller_mode = ControllerMode()
             controller_mode.header.stamp = self.get_clock().now().to_msg()

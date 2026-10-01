@@ -10,6 +10,7 @@ from pathlib import Path
 def generate_launch_description():
     mpc_package_name = 'thesis_mpc_controller'
     platform_package_name = 'thesis_platform_controller'
+    optitrack_package_name = 'thesis_optitrack_bridge'
     
     run_name = datetime.now().strftime("mpc_%m-%d_%H-%M")
     log_dir = str(Path.home() / "thesis_logs" / run_name)
@@ -42,7 +43,8 @@ def generate_launch_description():
         output='screen',
         parameters=[mpc_yaml_path, {
             'reference_preview_enabled': reference_preview_enabled
-        }]
+        }],
+        arguments=['--ros-args', '--log-level', 'info']
     )
 
     flight_control_node = Node(
@@ -56,12 +58,12 @@ def generate_launch_description():
     )
 
     platform_controller_node = Node(
-            package=platform_package_name,
-            executable='platform_controller',
-            name='platform_controller',
-            output='screen',
-            parameters=[platform_yaml_path]
-        )
+        package=platform_package_name,
+        executable='platform_controller',
+        name='platform_controller',
+        output='screen',
+        parameters=[platform_yaml_path]
+    )
     
     platform_kalman_filter_node = Node(
         package=platform_package_name,
@@ -83,6 +85,13 @@ def generate_launch_description():
         }]
     )
 
+    optitrack_bridge_node = Node(
+        package=optitrack_package_name,
+        executable='optitrack_bridge',
+        name='optitrack_bridge',
+        output='screen'
+    )
+
     return LaunchDescription([
         declare_reference_preview,
 
@@ -90,5 +99,6 @@ def generate_launch_description():
         flight_control_node,
         platform_kalman_filter_node,
         platform_controller_node,
-        quadcopter_kalman_filter_node
+        quadcopter_kalman_filter_node,
+        #optitrack_bridge_node
     ])
