@@ -84,6 +84,9 @@ class MPCNode(Node):
         self.t_start_land = 0
         self.z_start_land = 0
         self.landing_pad_offset = 0.15
+        self.landing_pad_z_offset = 0.055
+        self.v_land_max = 0.1
+        self.touchdown_height = 0.2
         
 
         self.quadcopter_subscription = self.create_subscription(
@@ -245,7 +248,7 @@ class MPCNode(Node):
 
     def get_z_error(self):
         quadcopter_z = self.quadcopter_pos[2]
-        platform_z = self.platform_pos[2] - 0.055
+        platform_z = self.platform_pos[2] - self.landing_pad_z_offset
         return abs(quadcopter_z - platform_z)
 
 
@@ -280,7 +283,7 @@ class MPCNode(Node):
 
 
     def get_descent_profile(self, i=0):
-        platform_z = self.platform_pos[2] - 0.055
+        platform_z = self.platform_pos[2] - self.landing_pad_z_offset
         if self.mpc_mode == MPC_MODE.TRACKING:
             return (platform_z + self.TRACK_HEIGHT, 0)
         
@@ -291,6 +294,29 @@ class MPCNode(Node):
         descent_z = max(platform_z, z_ref)
         descent_vz = -descent_speed if descent_z > platform_z else 0.0
         return (descent_z, descent_vz)
+
+    
+    def get_descent_profile_new(self, i=0):
+        platform_z = self.platform_pos[2] - self.landing_pad_z_offset
+        if self.mpc_mode == MPC_MODE.TRACKING:
+            return (platform_z + self.TRACK_HEIGHT, 0)
+
+        elapsed = (self.get_clock().now() - self.t_start_land).nanoseconds * 1e-9
+        future_t = elapsed + i * self.h
+        k = self.v_land_max / self.touchdown_height
+        height_error = self.z_start_land - platform_z
+        constant_descent_distance= max(0.0, height_error - self.touchdown_height)
+        t_begin_touchdown = constant_descent_distance / self.v_land_max
+        
+        if future_t <= t_begin_touchdown:
+            z_ref = self.z_start_land - self.v_land_max * future_t
+            vz_ref = -self.v_land_max
+        else:
+            time_in_touchdown = future_t - t_begin_touchdown
+            z_ref = platform_z + self.touchdown_height * np.exp(-k * time_in_touchdown)
+            vz_ref = -k * self.touchdown_height * np.exp(-k * time_in_touchdown)
+        
+        return (z_ref, vz_ref)
 
 
     def control_loop(self):
