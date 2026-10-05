@@ -241,28 +241,6 @@ class FlightControlNode(Node):
             self.enter_state(QuadcopterSequence.LANDING)
 
 
-    def check_safety_violation(self):
-        if self.last_valid_pos is None:
-            return "No valid quadcopter position"
-
-        x, y, z = self.last_valid_pos
-        if z > self.MAX_HEIGHT:
-            return f"Height {z} exceeds {self.MAX_HEIGHT}m limit"
-
-        if self.starting_position:
-            dx = x - self.starting_position[0]
-            dy = y - self.starting_position[1]
-            horizontal_distance = sqrt(dx ** 2 + dy**2)
-            if horizontal_distance > self.MAX_HORIZONTAL_DISPLACEMENT:
-                return f"Horizontal displacement {horizontal_distance:.2f} exceeds {self.MAX_HORIZONTAL_DISPLACEMENT}m limit"
-        if self.last_valid_att is not None:
-            phi, theta = self.last_valid_att
-            max_att = radians(self.MAX_ATTITUDE_DEG)
-            if abs(phi) > max_att or abs(theta) > max_att:
-                return f"Excessive attitude: phi={degrees(phi):.1f}deg, theta={degrees(theta):.1f}deg"
-        return None
-
-
     def enter_state(self, new_state: QuadcopterSequence):
         self.sequence = new_state
         self.state_entered_at = self.get_clock().now()
@@ -385,12 +363,7 @@ class FlightControlNode(Node):
             if state_age > 0.2:
                 self.emergency_land("Quadcopter state stale for more than 0.2s")
                 return
-            
-            # violation = self.check_safety_violation()
-            # if violation  is not None:
-            #     self.emergency_land(violation)
-            #     return
-            
+
             if self.latest_mpc_cmd_time is None or self.latest_mpc_setpoint is None:
                 self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
                 if self.time_elapsed() > 1.0:

@@ -55,7 +55,8 @@ class PlatformKalmanFilterNode(Node):
         else:
             log_dir = Path(f'log/{datetime.now().strftime("velocity_kf_%m-%d_%H-%M")}')
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f'platform_kalman_filter.csv'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f'platform_kf_{timestamp}.csv'
 
         self.kf_log_file = open(log_path, 'w', newline='', buffering=1)
         self.get_logger().info(f"Saved platform kalman filter csv to {log_path}")

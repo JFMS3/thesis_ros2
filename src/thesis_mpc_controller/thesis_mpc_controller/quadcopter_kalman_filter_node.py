@@ -58,7 +58,8 @@ class QuadcopterKalmanFilterNode(Node):
         else:
             log_dir = Path(f'log/{datetime.now().strftime("velocity_kf_%m-%d_%H-%M")}')
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f'quadcopter_kalman_filter.csv'
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f'quadcopter_kf_{timestamp}.csv'
 
         self.kf_log_file = open(
             log_path, 'w', newline='', buffering=1
