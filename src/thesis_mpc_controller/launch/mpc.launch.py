@@ -33,7 +33,19 @@ def generate_launch_description():
         default_value='true',
         description='true if platform reference preview is enabled, false otherwise.'
     )
+    declare_radius = DeclareLaunchArgument(
+        'radius',
+        default_value='0.8',
+        description='Radius of circular path for platform controller'
+    )
+    declare_linspeed = DeclareLaunchArgument(
+        'linspeed',
+        default_value='0.1',
+        description='Linear speed of the platform'
+    )
     reference_preview_enabled = LaunchConfiguration('reference_preview_enabled')
+    radius = LaunchConfiguration('radius')
+    linspeed = LaunchConfiguration('linspeed')
 
 
     mpc_node = Node(
@@ -62,7 +74,10 @@ def generate_launch_description():
         executable='platform_controller',
         name='platform_controller',
         output='screen',
-        parameters=[platform_yaml_path]
+        parameters=[platform_yaml_path, {
+            'RADIUS': radius,
+            'LINSPEED': linspeed
+        }]
     )
     
     platform_kalman_filter_node = Node(
@@ -94,6 +109,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         declare_reference_preview,
+        declare_radius,
+        declare_linspeed,
 
         mpc_node,
         flight_control_node,

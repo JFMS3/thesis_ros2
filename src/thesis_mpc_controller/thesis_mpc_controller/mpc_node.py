@@ -77,13 +77,15 @@ class MPCNode(Node):
         self.EXIT_LANDING_POS_THRESHOLD = float(self.get_parameter('EXIT_LANDING_POS_THRESHOLD').value)
         self.declare_parameter('EXIT_LANDING_SAMPLE_THRESHOLD', 20) # need 20 samples > pos error to exit landing
         self.EXIT_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('EXIT_LANDING_SAMPLE_THRESHOLD').value)
-        self.declare_parameter('LAND_ERROR_THRESHOLD', 0.1) # position error to cutoff power and land
-        self.LAND_ERROR_THRESHOLD = float(self.get_parameter('LAND_ERROR_THRESHOLD').value)
+        self.declare_parameter('LAND_XY_ERROR_THRESHOLD', 0.1) # position error to cutoff power and land
+        self.LAND_XY_ERROR_THRESHOLD = float(self.get_parameter('LAND_XY_ERROR_THRESHOLD').value)
+        self.declare_parameter('LAND_Z_ERROR_THRESHOLD', 0.05)
+        self.LAND_Z_ERROR_THRESHOLD = float(self.get_parameter('LAND_Z_ERROR_THRESHOLD').value)
         self.exit_landing_sample_count = 0
         self.mpc_mode = MPC_MODE.TRACKING
         self.t_start_land = 0
         self.z_start_land = 0
-        self.landing_pad_offset = 0.15
+        self.landing_pad_offset = 0.17
         self.landing_pad_z_offset = 0.055
         self.v_land_max = 0.1
         self.touchdown_height = 0.2
@@ -196,7 +198,7 @@ class MPCNode(Node):
                 vx = self.platform_prediction.vx[i]
                 vy = self.platform_prediction.vy[i]
                 ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy)
-                ref_z, ref_vz = self.get_descent_profile(i)
+                ref_z, ref_vz = self.get_descent_profile_new(i)
 
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
@@ -214,7 +216,7 @@ class MPCNode(Node):
                 pred_x = x + vx * i * self.h
                 pred_y = y + vy * i * self.h
                 ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, vx, vy)
-                ref_z, ref_vz = self.get_descent_profile(i)
+                ref_z, ref_vz = self.get_descent_profile_new(i)
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
                 refs[i, 2] = ref_z
@@ -334,7 +336,7 @@ class MPCNode(Node):
         
         xy_error = self.get_xy_error()
         z_error = self.get_z_error()
-        if self.mpc_mode == MPC_MODE.LANDING and xy_error < self.LAND_ERROR_THRESHOLD and z_error < 0.1:
+        if self.mpc_mode == MPC_MODE.LANDING and xy_error < self.LAND_XY_ERROR_THRESHOLD and z_error < self.LAND_Z_ERROR_THRESHOLD:
             self.get_logger().info(f"Sufficiently close to platform, cutting power!")
             controller_mode = ControllerMode()
             controller_mode.header.stamp = self.get_clock().now().to_msg()

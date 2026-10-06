@@ -203,7 +203,7 @@ class FlightControlNode(Node):
         phi = msg.attitude[0]
         theta = msg.attitude[1]
         attitude_ok = abs(phi) < radians(10) and abs(theta) < radians(10)
-        self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(phi):.2f}, THETA: {degrees(theta):.2f}")
+        #self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(phi):.2f}, THETA: {degrees(theta):.2f}")
         self.attitude_health.append(attitude_ok)
         
         if not self.got_first_state:
