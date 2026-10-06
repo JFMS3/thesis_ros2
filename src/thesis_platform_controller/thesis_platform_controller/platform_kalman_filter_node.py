@@ -10,6 +10,8 @@ from datetime import datetime
 
 import numpy as np
 from ament_index_python.packages import get_package_share_directory
+from collections import deque
+from std_msgs.msg import Bool
 
 class PlatformKalmanFilterNode(Node):
     """Subscribes to platform topic, publishes velocity estimates"""
@@ -45,9 +47,10 @@ class PlatformKalmanFilterNode(Node):
 
         self.create_subscription(PlatformState, '/measured_platform_state', self.on_measurement, state_qos)
         self.pub = self.create_publisher(PlatformState, '/full_platform_state', 10)
-        self.nis_pub = self.create_publisher(Float64, '/observed_nis', 10)
-        self.get_logger().info("Platform Kalman filter has begun!")
+        self.healthline_pub = self.create_publisher(Bool, '/platform_kf_healthline', 10)
+        self.healthline_window = deque(maxlen=120)
 
+        self.get_logger().info("Platform Kalman filter has begun!")
         self.declare_parameter('log_dir', '')
         log_dir = self.get_parameter('log_dir').value
         if log_dir:
@@ -75,15 +78,22 @@ class PlatformKalmanFilterNode(Node):
             self.kf.initialise(msg.position)
             self.prev_stamp = stamp
             return
-        
-        dt = stamp - self.prev_stamp
+
+        dt = 1.0/120.0
+        arrival_dt = stamp - self.prev_stamp
         self.prev_stamp = stamp
-        if not (0.0 < dt <= self.max_dt):
-            self.get_logger().warn(f"Bad dt of {dt:.4f}s, skipping...")
+        if (arrival_dt <= 0):
+            self.get_logger().warn(f"Bad arrival dt of {dt:.4f}s, skipping...")
             return
+
 
         self.kf.predict(dt)
         nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold) # disabling self.nis_threshold
+
+        self.healthline_window.append(ok)
+        healthy = len(self.healthline_window) >= 120 and np.mean(self.healthline_window) >= 0.8
+        self.healthline_pub.publish(Bool(data=bool(healthy)))
+
         # if not ok:
         #     self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...", throttle_duration_sec=1.0)
 
@@ -98,7 +108,6 @@ class PlatformKalmanFilterNode(Node):
         observed_state.velocity = [x[i] for i in range(3,6)]
         observed_state.attitude = msg.attitude
         self.pub.publish(observed_state)
-        self.nis_pub.publish(Float64(data=nis))
 
 def main(args=None):
     rclpy.init(args=args)

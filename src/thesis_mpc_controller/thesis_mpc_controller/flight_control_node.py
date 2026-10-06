@@ -15,6 +15,8 @@ import csv
 from cflib.crazyflie.log import LogConfig
 from datetime import datetime
 from pathlib import Path
+from collections import deque
+from std_msgs.msg import Bool
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
@@ -92,6 +94,8 @@ class FlightControlNode(Node):
         self.timer = self.create_timer(0.05, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
         self.platform_pos = None
+        self.attitude_health = deque(maxlen=120)
+        self.platform_kf_healthy = False
 
         self.quadcopter_state_subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
@@ -114,6 +118,10 @@ class FlightControlNode(Node):
 
         self.mpc_cmd_subscription = self.create_subscription(
             MPCCommand, '/mpc_cmd', self.mpc_cmd_callback, 10
+        )
+
+        self.platform_kf_healthline = self.create_subscription(
+            Bool, '/platform_kf_healthline', self.platform_healthline_callback, 10
         )
 
         self.declare_parameter('log_dir', '')
@@ -173,6 +181,9 @@ class FlightControlNode(Node):
     def platform_callback(self, msg: PlatformState):
         self.platform_pos = list(msg.position)
 
+    def platform_healthline_callback(self, msg: Bool):
+        self.platform_kf_healthy = msg.data
+
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
@@ -188,6 +199,12 @@ class FlightControlNode(Node):
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
+
+        phi = msg.attitude[0]
+        theta = msg.attitude[1]
+        attitude_ok = abs(phi) < radians(10) and abs(theta) < radians(10)
+        self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(phi):.2f}, THETA: {degrees(theta):.2f}")
+        self.attitude_health.append(attitude_ok)
         
         if not self.got_first_state:
             self.get_logger().info(f"Got starting position {x}, {y}, {z}")
@@ -313,6 +330,12 @@ class FlightControlNode(Node):
 
         elif self.sequence == QuadcopterSequence.ARMING:
             if self.time_elapsed() > 5:
+                quadcopter_attitude_healthy = len(self.attitude_health) >= 120 and sum(self.attitude_health)/120 >= 0.7
+                if not quadcopter_attitude_healthy:
+                    self.get_logger().warn("Initial Optitrack attitude not level, aborting...")
+                    self.enter_state(QuadcopterSequence.DONE)
+                    return
+                
                 self.get_logger().info("Taking off...")
                 self.cf.high_level_commander.takeoff(
                     absolute_height_m=self.target_z, 
@@ -339,7 +362,14 @@ class FlightControlNode(Node):
 
         elif self.sequence == QuadcopterSequence.HANDOVER:
             self.cf.commander.send_setpoint(0.0, 0.0, 0.0, self.CRAZYFLIE_HOVER_THRUST)
+            quadcopter_attitude_healthy = len(self.attitude_health) >= 120 and sum(self.attitude_health)/120 >= 0.7
             if self.time_elapsed() > self.HANDOVER_DURATION:
+                if not quadcopter_attitude_healthy:
+                    self.emergency_land("Optitrack attitude not level before takeoff, aborting...")
+                    return
+                elif not self.platform_kf_healthy:
+                    self.emergency_land("Platform kalman filter exploding, aborting...")
+                    return
                 self.get_logger().info(f"Transitioning to MPC control... ")
 
                 controller_mode = ControllerMode()
@@ -400,7 +430,7 @@ class FlightControlNode(Node):
                 self.get_logger().warn("Emergency landing complete")
 
         elif self.sequence == QuadcopterSequence.DONE:
-            self.get_logger().info("Done!")
+            self.get_logger().info("Done!", throttle_duration_sec=10.0)
             pass
 
 
