@@ -30,16 +30,16 @@ class PlatformKalmanFilterNode(Node):
         R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3)
         R_pos = R_pos * np.eye(3)
         sigma_accel = [float(v) for v in self.get_parameter('sigma_accel').value]
-        P_pos_init = float(self.get_parameter('P_pos_init').value)
-        P_vel_init = float(self.get_parameter('P_vel_init').value)
+        self.P_pos_init = float(self.get_parameter('P_pos_init').value)
+        self.P_vel_init = float(self.get_parameter('P_vel_init').value)
         self.max_dt = self.get_parameter('max_dt').value
         self.nis_threshold = self.get_parameter('nis_threshold').value
 
         self.kf = PositionVelocityKalmanFilter(
             R_pos,
             sigma_accel,
-            P_pos_init,
-            P_vel_init,
+            self.P_pos_init,
+            self.P_vel_init,
             self.max_dt
         )
         self.nis_threshold = self.get_parameter('nis_threshold').value
@@ -49,6 +49,9 @@ class PlatformKalmanFilterNode(Node):
         self.pub = self.create_publisher(PlatformState, '/full_platform_state', 10)
         self.healthline_pub = self.create_publisher(Bool, '/platform_kf_healthline', 10)
         self.healthline_window = deque(maxlen=120)
+
+        self.reject_count = 0
+        self.max_rejections = 60
 
         self.get_logger().info("Platform Kalman filter has begun!")
         self.declare_parameter('log_dir', '')
@@ -89,13 +92,21 @@ class PlatformKalmanFilterNode(Node):
 
         self.kf.predict(dt)
         nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold) # disabling self.nis_threshold
+        self.reject_count = 0 if ok else self.reject_count + 1
 
         self.healthline_window.append(ok)
         healthy = len(self.healthline_window) >= 120 and np.mean(self.healthline_window) >= 0.8
         self.healthline_pub.publish(Bool(data=bool(healthy)))
-
-        # if not ok:
-        #     self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...", throttle_duration_sec=1.0)
+        
+        if self.reject_count >= self.max_rejections:
+            expected_platform_height = 0.023
+            # reset kalman filter if last measurement is sensible
+            if abs(msg.position[2] - expected_platform_height) < 0.05:
+                self.get_logger().info("Resetting platform kalman filter")
+                self.kf.initialise(msg.position)
+                self.kf.kf.P = np.diag([self.P_pos_init] * 3 + [self.P_vel_init] * 3)
+                self.reject_count = 0
+                self.healthline_window.clear()
 
         observed_state = PlatformState()
         observed_state.header = msg.header

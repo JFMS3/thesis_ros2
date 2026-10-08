@@ -106,7 +106,7 @@ class PlatformController(Node):
         self.get_logger().info(
             f"Refit: centre ({cx:+.3f},{cy:+.3f}) moved {moved:.3f} m, radius {r:.3f} (cmd {self.radius:.3f})")
         if moved > 0.5 * self.radius:
-            self.get_logger().warn(f"Yaw-based centre was off by {moved:.3f} m - probably mocap error")
+            self.get_logger().warn(f"Yaw-based centre was off by {moved:.3f}m")
 
 
     def state_callback(self, msg: PlatformState):

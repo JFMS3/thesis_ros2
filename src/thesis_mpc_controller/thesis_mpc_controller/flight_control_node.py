@@ -74,7 +74,7 @@ class FlightControlNode(Node):
         self.MAX_ATTITUDE_DEG = float(self.get_parameter('MAX_ATTITUDE_DEG').value)
         self.declare_parameter('HOVER_DURATION', 3.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
-        self.declare_parameter('HANDOVER_DURATION', 2.0)
+        self.declare_parameter('HANDOVER_DURATION', 1.5)
         self.HANDOVER_DURATION = float(self.get_parameter('HANDOVER_DURATION').value)
 
         self.declare_parameter('CRAZYFLIE_HOVER_THRUST', 39250)
@@ -221,7 +221,6 @@ class FlightControlNode(Node):
                 if implied_speed > MAX_POSSIBLE_SPEED:
                     self.rejected_count += 1
                     self.consecutive_rejects += 1
-                    self.get_logger().warn(f"Rejecting optitrack jump of {dist:.3f}m over {dt:.3f}s. Rejected counter: {self.rejected_count}, consecutive counter: {self.consecutive_rejects}")
                     if self.consecutive_rejects < 5:
                         return
                     self.get_logger().warn("5 consecutive rejects, treating as real motion and accepting")
