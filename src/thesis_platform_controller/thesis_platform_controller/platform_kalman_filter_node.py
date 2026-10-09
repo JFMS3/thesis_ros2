@@ -12,6 +12,7 @@ import numpy as np
 from ament_index_python.packages import get_package_share_directory
 from collections import deque
 from std_msgs.msg import Bool
+from math import sqrt
 
 class PlatformKalmanFilterNode(Node):
     """Subscribes to platform topic, publishes velocity estimates"""
@@ -25,10 +26,13 @@ class PlatformKalmanFilterNode(Node):
         self.declare_parameter('P_vel_init', 0.1)
         self.declare_parameter('nis_threshold', 16)
         self.declare_parameter('max_dt', 0.1)
+        self.declare_parameter('R_pos_scalar', 10)
 
+        R_pos_scalar = float(self.get_parameter('R_pos_scalar').value)
         R_pos_raw = self.get_parameter('R_pos').value
-        R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3)
+        R_pos = np.asarray(R_pos_raw, dtype=float).reshape(3, 3) * R_pos_scalar
         R_pos = R_pos * np.eye(3)
+
         sigma_accel = [float(v) for v in self.get_parameter('sigma_accel').value]
         self.P_pos_init = float(self.get_parameter('P_pos_init').value)
         self.P_vel_init = float(self.get_parameter('P_vel_init').value)
@@ -52,6 +56,9 @@ class PlatformKalmanFilterNode(Node):
 
         self.reject_count = 0
         self.max_rejections = 60
+        self.EXPECTED_PLATFORM_HEIGHT = 0.023
+        self.last_good_pos = None
+        self.last_good_stamp = None
 
         self.get_logger().info("Platform Kalman filter has begun!")
         self.declare_parameter('log_dir', '')
@@ -77,9 +84,12 @@ class PlatformKalmanFilterNode(Node):
 
     def on_measurement(self, msg):
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        pos = np.array(msg.position, dtype=float)
         if not self.kf.initialised:
             self.kf.initialise(msg.position)
             self.prev_stamp = stamp
+            self.last_good_pos = pos.copy()
+            self.last_good_stamp = stamp
             return
 
         dt = 1.0/120.0
@@ -89,19 +99,31 @@ class PlatformKalmanFilterNode(Node):
             self.get_logger().warn(f"Bad arrival dt of {dt:.4f}s, skipping...")
             return
 
-
         self.kf.predict(dt)
-        nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold) # disabling self.nis_threshold
-        self.reject_count = 0 if ok else self.reject_count + 1
+        elapsed = stamp - self.last_good_stamp
+        xy_jump = sqrt((pos[0]-self.last_good_pos[0])**2 + (pos[1]-self.last_good_pos[1])**2)
+        z_error = abs(pos[2] - self.EXPECTED_PLATFORM_HEIGHT)
+        max_xy_jump = 0.3 * elapsed + 0.03
+        plausible_measurement = z_error < 0.05 and elapsed > 0 and xy_jump <= max_xy_jump
 
+        if plausible_measurement:
+            nis, ok = self.kf.update(msg.position, nis_threshold=self.nis_threshold)
+        else:
+            nis, ok = None, False
+
+        if ok:
+            self.last_good_pos = pos.copy()
+            self.last_good_stamp = stamp
+
+        self.reject_count = 0 if ok else self.reject_count + 1
         self.healthline_window.append(ok)
         healthy = len(self.healthline_window) >= 120 and np.mean(self.healthline_window) >= 0.8
         self.healthline_pub.publish(Bool(data=bool(healthy)))
         
         if self.reject_count >= self.max_rejections:
-            expected_platform_height = 0.023
+            self.get_logger().warn("Platform KF has rejected 0.5s of measurements", throttle_duration_sec = 1.0)
             # reset kalman filter if last measurement is sensible
-            if abs(msg.position[2] - expected_platform_height) < 0.05:
+            if abs(msg.position[2] - self.EXPECTED_PLATFORM_HEIGHT) < 0.05:
                 self.get_logger().info("Resetting platform kalman filter")
                 self.kf.initialise(msg.position)
                 self.kf.kf.P = np.diag([self.P_pos_init] * 3 + [self.P_vel_init] * 3)

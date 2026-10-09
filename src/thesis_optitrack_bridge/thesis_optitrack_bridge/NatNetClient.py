@@ -313,8 +313,8 @@ class NatNetClient:
         rigid_body = MoCapData.RigidBody(new_id, pos, rot)
 
         # Send information to any listener.
-        if self.rigid_body_listener is not None:
-            self.rigid_body_listener(new_id, pos, rot)
+        # if self.rigid_body_listener is not None:
+        #     self.rigid_body_listener(new_id, pos, rot)
 
         marker_error, = FloatValue.unpack(data[offset:offset+4])
         offset += 4
@@ -327,6 +327,8 @@ class NatNetClient:
         is_valid_str = 'False'
         if tracking_valid:
             is_valid_str = 'True'
+            if self.rigid_body_listener is not None:
+                self.rigid_body_listener(new_id, pos, rot)
         trace_mf("\tTracking Valid: %s" % is_valid_str)
         if tracking_valid:
             rigid_body.tracking_valid = True
