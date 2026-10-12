@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
-from thesis_interfaces.msg import QuadcopterState
+from thesis_interfaces.msg import QuadcopterState, AttitudeIMU
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from .kalman_filter import PositionVelocityKalmanFilter
 import numpy as np
@@ -44,12 +44,19 @@ class QuadcopterKalmanFilterNode(Node):
             P_vel_init,
             self.max_dt
         )
-        self.prev_stamp = None
+        self.prev_quadcopter_state_stamp = None
 
         self.create_subscription(QuadcopterState, '/measured_quadcopter_state', self.on_measurement, state_qos)
         self.pub = self.create_publisher(QuadcopterState, '/full_quadcopter_state', 10)
         self.nis_pub = self.create_publisher(Float64, '/observed_nis', 10)
         self.get_logger().info("Quadcopter Kalman filter has begun!")
+
+        self.imu_phi = None
+        self.imu_theta = None
+        self.prev_imu_stamp = None
+        self.imu_attitude_subscription = self.create_subscription(
+            AttitudeIMU, '/attitude_imu', self.imu_attitude_callback, state_qos
+        )
 
         self.declare_parameter('log_dir', '')
         log_dir = self.get_parameter('log_dir').value
@@ -73,17 +80,33 @@ class QuadcopterKalmanFilterNode(Node):
             'nis', 'measurement_accepted'
         ])
 
+
+    def imu_attitude_callback(self, msg):
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self.prev_imu_stamp is not None:
+            if stamp <= self.prev_imu_stamp:
+                return
+        self.prev_imu_stamp = stamp
+        self.imu_phi = msg.imu_phi
+        self.imu_theta = msg.imu_theta
+
+
     def on_measurement(self, msg):
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if not self.kf.initialised:
             self.kf.initialise(msg.position)
-            self.prev_stamp = stamp
+            self.prev_quadcopter_state_stamp = stamp
             return
         
-        dt = stamp - self.prev_stamp
-        self.prev_stamp = stamp
+        dt = stamp - self.prev_quadcopter_state_stamp
+        self.prev_quadcopter_state_stamp = stamp
         if not (0.0 < dt <= self.max_dt):
-            self.get_logger().warn(f"Bad dt of {dt:.4f}s, skipping...")
+            self.get_logger().warn(f"Measured quadcopter state stale for {dt:.4f}s, skipping...")
+            return
+
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if self.prev_imu_stamp is None or now - self.prev_imu_stamp > 0.15:
+            self.get_logger().warn("Internal IMU stale or not sending data", throttle_duration_sec=1.0)
             return
 
         self.kf.predict(dt)
@@ -102,7 +125,7 @@ class QuadcopterKalmanFilterNode(Node):
         ])
         observed_state.position = [x[i] for i in range(3)]
         observed_state.velocity = [x[i] for i in range(3,6)]
-        observed_state.attitude = msg.attitude
+        observed_state.attitude = [self.imu_phi, self.imu_theta]
         self.pub.publish(observed_state)
         self.nis_pub.publish(Float64(data=nis))
 

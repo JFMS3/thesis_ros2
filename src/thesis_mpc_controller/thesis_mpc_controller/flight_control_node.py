@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from math import sqrt, degrees, radians
 
-from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand, PlatformState
+from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand, PlatformState, AttitudeIMU
 
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from collections import deque
 from std_msgs.msg import Bool
+from numpy import deg2rad
 
 
 RADIO_URI = "radio://0/80/2M/E7E7E7E7E7"
@@ -91,11 +92,26 @@ class FlightControlNode(Node):
         self.get_logger().info("Radio link set up")
         self.cf.param.set_value('stabilizer.estimator', '2')
 
+        self.imu_phi = None # roll
+        self.imu_theta = None # pitch
+        self.imu_attitude = LogConfig(name='IMU Attitude', period_in_ms=20)
+        self.imu_attitude.add_variable('stabilizer.roll', 'float')
+        self.imu_attitude.add_variable('stabilizer.pitch', 'float')
+        self.cf.log.add_config(self.imu_attitude)
+        self.imu_attitude.data_received_cb.add_callback(self.imu_attitude_callback)
+        
+
         self.timer = self.create_timer(0.05, self.step_sequence)
         self.get_logger().info("Starting hover, waiting for state estimate")
         self.platform_pos = None
         self.attitude_health = deque(maxlen=120)
         self.platform_kf_healthy = False
+
+        
+        self.imu_attitude_publisher = self.create_publisher(
+            AttitudeIMU, '/attitude_imu', qos
+        )
+        self.imu_attitude.start()
 
         self.quadcopter_state_subscription = self.create_subscription(
             QuadcopterState, '/measured_quadcopter_state', self.sequence_callback, qos
@@ -110,10 +126,7 @@ class FlightControlNode(Node):
         )
 
         self.controller_mode_subscription = self.create_subscription(
-            ControllerMode,
-            '/controller_mode',
-            self.controller_mode_callback,
-            mpc_active_qos
+            ControllerMode, '/controller_mode', self.controller_mode_callback, mpc_active_qos
         )
 
         self.mpc_cmd_subscription = self.create_subscription(
@@ -138,7 +151,8 @@ class FlightControlNode(Node):
 
         self.log_writer.writerow([
             "time", "sequence", "x", "y", "z",
-            "phi_measured", "theta_measured", 
+            "phi_measured", "theta_measured",
+            'imu_phi', 'imu_theta',
             "sent_phi_deg", "sent_theta_deg", "sent_thrust_raw",
             "state_age", "mpc_cmd_age", "rejected_optitrack_count",
         ])
@@ -150,30 +164,16 @@ class FlightControlNode(Node):
 
     def log_flight_data(self):
         now = self.get_clock().now()
-        if self.last_valid_pos is not None:
-            x, y, z = self.last_valid_pos
-        else:
-            x = y = z = float("nan")
-
-        if self.last_valid_att is not None:
-            phi, theta = self.last_valid_att
-        else:
-            phi = theta = float("nan")
-
-        if self.last_valid_time is not None:
-            state_age = (now - self.last_valid_time).nanoseconds * 1e-9
-        else:
-            state_age = float("nan")
-
-        if self.latest_mpc_cmd_time is not None:
-            mpc_cmd_age = (now - self.latest_mpc_cmd_time).nanoseconds * 1e-9
-        else:
-            mpc_cmd_age = float("nan")
+        x, y, z = self.last_valid_pos or (None, None, None)
+        phi, theta = self.last_valid_att or (None, None)
+        state_age = (now - self.last_valid_time).nanoseconds * 1e-9 if self.last_valid_time is not None else None
+        mpc_cmd_age = (now - self.latest_mpc_cmd_time).nanoseconds * 1e-9 if self.latest_mpc_cmd_time is not None else None
 
         self.log_writer.writerow([
             now.nanoseconds * 1e-9,
             self.sequence.name, x, y, z,
-            phi, theta, self.last_sent_phi,
+            phi, theta, self.imu_phi, self.imu_theta,
+            self.last_sent_phi,
             self.last_sent_theta, self.last_sent_thrust,
             state_age, mpc_cmd_age, self.rejected_count,
         ])
@@ -184,6 +184,17 @@ class FlightControlNode(Node):
     def platform_healthline_callback(self, msg: Bool):
         self.platform_kf_healthy = msg.data
 
+    def imu_attitude_callback(self, timestamp, data, logconf):
+        imu_roll = data['stabilizer.roll']
+        imu_pitch = data['stabilizer.pitch']
+        self.imu_phi = deg2rad(imu_roll)
+        self.imu_theta = -deg2rad(imu_pitch)
+
+        imu_attitude = AttitudeIMU()
+        imu_attitude.header.stamp = self.get_clock().now().to_msg()
+        imu_attitude.imu_phi = self.imu_phi
+        imu_attitude.imu_theta = self.imu_theta
+        self.imu_attitude_publisher.publish(imu_attitude)
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
@@ -200,9 +211,10 @@ class FlightControlNode(Node):
         y = msg.position[1]
         z = msg.position[2]
 
-        phi = msg.attitude[0]
-        theta = msg.attitude[1]
-        attitude_ok = abs(phi) < radians(10) and abs(theta) < radians(10)
+        attitude_ok = (
+            self.imu_phi is not None and self.imu_theta is not None and
+            abs(self.imu_phi) < radians(10) and abs(self.imu_theta) < radians(10)
+        )
         #self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(phi):.2f}, THETA: {degrees(theta):.2f}")
         self.attitude_health.append(attitude_ok)
         

@@ -26,6 +26,7 @@ if(BUILD_TESTING)
 endif()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AttitudeIMU.msg"
   "msg/ControllerMode.msg"
   "msg/MPCCommand.msg"
   "msg/PlatformState.msg"
