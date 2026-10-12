@@ -401,8 +401,8 @@ class FlightControlNode(Node):
                 return
 
             state_age = (self.get_clock().now() - self.last_valid_time).nanoseconds * 1e-9
-            if state_age > 0.2:
-                self.emergency_land("Quadcopter state stale for more than 0.2s")
+            if state_age > 0.5:
+                self.emergency_land("Quadcopter state stale for more than 0.5s")
                 return
 
             if self.latest_mpc_cmd_time is None or self.latest_mpc_setpoint is None:

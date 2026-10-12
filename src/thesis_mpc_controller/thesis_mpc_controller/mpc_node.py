@@ -39,13 +39,17 @@ class MPCNode(Node):
         self.declare_parameter('Az', 0.6)
         self.declare_parameter('tau_phi', 94.6e-4)
         self.declare_parameter('tau_theta', 94.6e-4)
+        self.declare_parameter('landing_mode_weights', [12, 12, 8, 2, 2, 3, 0, 0])
+        self.declare_parameter('tracking_mode_weights', [7, 7, 5, 3, 3, 3, 0, 0])
 
         Ax = float(self.get_parameter('Ax').value)
         Ay = float(self.get_parameter('Ay').value)
         Az = float(self.get_parameter('Az').value)
         tau_phi = float(self.get_parameter('tau_phi').value)
-        tau_theta = float(self.get_parameter('tau_theta').value)
-        
+        tau_theta = float(self.get_parameter('tau_theta').value)      
+        self.landing_mode_weights = [float(w) for w in self.get_parameter('landing_mode_weights').value]        
+        self.tracking_mode_weights = [float(w) for w in self.get_parameter('tracking_mode_weights').value]
+  
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -319,13 +323,13 @@ class MPCNode(Node):
 
     def update_mpc_weights(self):
         if self.mpc_mode == MPC_MODE.LANDING:
-            Q_mat = np.diag([12, 12, 8, 2, 2, 3, 0, 0])
+            Q_mat = np.diag(self.landing_mode_weights)
             phi_max = np.deg2rad(3)
             theta_max = np.deg2rad(3)
             Tdev_max = 0.05
 
         else:
-            Q_mat = np.diag([5, 5, 5, 3, 3, 3, 0, 0])
+            Q_mat = np.diag(self.tracking_mode_weights)
             phi_max = np.deg2rad(8)
             theta_max = np.deg2rad(8)
             Tdev_max = 0.05
