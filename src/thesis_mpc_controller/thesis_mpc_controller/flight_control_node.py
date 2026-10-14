@@ -10,6 +10,7 @@ from thesis_interfaces.msg import QuadcopterState, ControllerMode, MPCCommand, P
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
+from cflib.crazyflie.syncLogger import SyncLogger
 
 import csv
 from cflib.crazyflie.log import LogConfig
@@ -54,13 +55,11 @@ class FlightControlNode(Node):
         self.last_valid_att = None
         self.last_valid_time = None
 
-        self.last_msg_time = None
-        self.max_gap_seen = 0
-        self.gap_count = 0
         self.emergency_stopped = False
-        self._hover_commanded = False
+        self.hover_commanded = False
         self.rejected_count = 0
         self.consecutive_rejects = 0
+        self.battery_checked = False
 
         self.latest_mpc_setpoint = None
         self.latest_mpc_cmd_time = None
@@ -178,6 +177,25 @@ class FlightControlNode(Node):
             state_age, mpc_cmd_age, self.rejected_count,
         ])
 
+    def check_battery(self):
+        battery_log = LogConfig(name='BatteryCheck', period_in_ms=1000)
+        battery_log.add_variable('pm.batteryLevel', 'float')
+        battery_log.add_variable('pm.vbat', 'float')
+
+        with SyncLogger(self.sync_cf, battery_log) as logger:
+            for log_entry in logger:
+                battery_data = log_entry[1]
+                battery_level = battery_data.get('pm.batteryLevel')
+                battery_voltage = battery_data.get('pm.vbat')
+                self.get_logger().info(f"Battery level: {battery_level}%, voltage: {battery_voltage}V")
+                
+                if battery_level < 15:
+                    self.get_logger().warn("Battery health less than 15%, recharge and try again!")
+                    self.enter_state(QuadcopterSequence.DONE)
+                
+                return
+
+
     def platform_callback(self, msg: PlatformState):
         self.platform_pos = list(msg.position)
 
@@ -198,15 +216,7 @@ class FlightControlNode(Node):
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
-        if self.last_msg_time is not None:
-            gap = (now - self.last_msg_time).nanoseconds/1e9
-            if gap > 0.15:
-                self.gap_count += 1
-                self.get_logger().warn(f"Optitrack gap of {gap*1000:.1f}ms since last message (gap count: {self.gap_count})")
-            if gap > self.max_gap_seen:
-                self.max_gap_seen = gap
         
-        self.last_msg_time = now
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
@@ -278,7 +288,6 @@ class FlightControlNode(Node):
     
 
     def shutdown(self):
-        self.get_logger().info(f"Max gap: {self.max_gap_seen}, no. gaps: {self.gap_count}")
         self.timer.cancel()
         try:
             self.sync_cf.close_link()
@@ -334,6 +343,9 @@ class FlightControlNode(Node):
                 self.shutdown()
 
         elif self.sequence == QuadcopterSequence.STARTING_ESTIMATOR:
+            if not self.battery_checked:
+                self.check_battery()
+                self.battery_checked = True
             if self.time_elapsed() > 2:
                 self.get_logger().info("Arming...")
                 self.cf.supervisor.send_arming_request(True)
@@ -356,10 +368,10 @@ class FlightControlNode(Node):
 
         elif self.sequence == QuadcopterSequence.TAKEOFF:
             if self.time_elapsed() > TAKEOFF_DURATION + 0.5:
-                if not self._hover_commanded:
+                if not self.hover_commanded:
                     self.get_logger().info(f"Beginning hover at {self.target_z}m for {self.HOVER_DURATION}s")
                     self.cf.high_level_commander.go_to(x=self.starting_position[0], y=self.starting_position[1], z=self.target_z, yaw=0, duration_s=1.0)
-                    self._hover_commanded = True
+                    self.hover_commanded = True
                 if self.time_elapsed() > TAKEOFF_DURATION + 1.5:
                     self.get_logger().info(f"Hovering for {self.HOVER_DURATION}s")
                     self.enter_state(QuadcopterSequence.HOVERING)
@@ -468,21 +480,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-'''
-usbipd list
-usbipd bind --busid <BUS_ID> (in powershell admin)
-usbipd attach --wsl --busid <BUS_ID>
-
-(In WSL)
-lsusb
-sudo chmod 666 /dev/bus/usb/001/<ID from lsusb>
-
-colcon build --packages-select thesis_optitrack_bridge
-source install/setup.bash
-ros2 run thesis_optitrack_bridge hover_test_node
-
-(when done)
-usbipd detach --busid <BUS_ID>
-'''

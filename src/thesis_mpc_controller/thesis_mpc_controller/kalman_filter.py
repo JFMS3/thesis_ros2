@@ -40,6 +40,8 @@ class PositionVelocityKalmanFilter:
 
     def update(self, pos, nis_threshold=None):
         pos_measured = np.asarray(pos, float)
+        if not np.all(np.isfinite(pos_measured)):
+            return np.nan, False
         # self.kf.x is where model thinks we are and we extract the position by multiplying by H.
         innovation = pos_measured - self.kf.H @ self.kf.x
         innovation_covariance = self.kf.H @ self.kf.P @ self.kf.H.T + self.kf.R

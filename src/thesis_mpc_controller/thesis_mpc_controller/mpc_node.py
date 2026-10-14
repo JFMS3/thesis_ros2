@@ -91,9 +91,9 @@ class MPCNode(Node):
         self.mpc_mode = MPC_MODE.TRACKING
         self.t_start_land = 0
         self.z_start_land = 0
-        self.landing_pad_offset = 0.16
+        self.landing_pad_offset = 0.25
         self.landing_pad_z_offset = 0.021
-        self.v_land_max = 0.08
+        self.v_land_max = 0.12
         self.touchdown_height = 0.2
         self.last_platform_direction = None
         

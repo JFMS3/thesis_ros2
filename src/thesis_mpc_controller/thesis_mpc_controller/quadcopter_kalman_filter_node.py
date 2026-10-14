@@ -20,12 +20,12 @@ class QuadcopterKalmanFilterNode(Node):
             4.08163319e-09, 5.55542538e-09, 5.95189493e-09,
             5.91631335e-09, 5.95189493e-09, 8.73493455e-09
         ]) 
-        self.declare_parameter('sigma_accel', [0.09621782, 0.1114207, 0.0656136])
+        self.declare_parameter('sigma_accel', [0.6, 0.45, 0.6])
         self.declare_parameter('P_pos_init', 0.001)
         self.declare_parameter('P_vel_init', 0.1)
         self.declare_parameter('nis_threshold', 16)
         self.declare_parameter('max_dt', 0.1)
-        self.declare_parameter('R_pos_scalar', 100)
+        self.declare_parameter('R_pos_scalar', 1000)
 
         R_pos_scalar = float(self.get_parameter('R_pos_scalar').value)
         R_pos_raw = self.get_parameter('R_pos').value
@@ -99,22 +99,23 @@ class QuadcopterKalmanFilterNode(Node):
             return
         
         dt = stamp - self.prev_quadcopter_state_stamp
-        self.prev_quadcopter_state_stamp = stamp
-        if not (0.0 < dt <= self.max_dt):
-            self.get_logger().warn(f"Measured quadcopter state stale for {dt:.4f}s, skipping...")
+        if dt <= 0:
             return
-
+        
         now = self.get_clock().now().nanoseconds * 1e-9
         if self.prev_imu_stamp is None or now - self.prev_imu_stamp > 0.15:
-            self.get_logger().warn("Internal IMU stale or not sending data", throttle_duration_sec=1.0)
+            self.get_logger().warn(f"Measured quadcopter state stale for {dt:.4f}s, skipping...", throttle_duration_sec = 1.0)
             return
+        
+        self.prev_quadcopter_state_stamp = stamp
+        remaining_time = dt
+        while remaining_time > 1e-9:
+            timestep = min(remaining_time, self.max_dt)
+            self.kf.predict(timestep)
+            remaining_time -= timestep
 
-        self.kf.predict(dt)
         nis, ok = self.kf.update(msg.position, nis_threshold=None)# previously self.nis_threshold
         
-        # if not ok:
-        #     self.get_logger().warn(f"NIS {nis:.2f} > threshold, so predicting not updating here...")
-
         observed_state = QuadcopterState()
         observed_state.header = msg.header
         x = self.kf.get_state()

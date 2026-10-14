@@ -92,14 +92,18 @@ class PlatformKalmanFilterNode(Node):
             self.last_good_stamp = stamp
             return
 
-        dt = 1.0/120.0
-        arrival_dt = stamp - self.prev_stamp
-        self.prev_stamp = stamp
-        if (arrival_dt <= 0):
-            self.get_logger().warn(f"Bad arrival dt of {dt:.4f}s, skipping...")
+        dt = stamp - self.prev_stamp
+        if dt <= 0:
             return
 
-        self.kf.predict(dt)
+        # compensate for occaisional missing optitrack measurements which cause large dt
+        self.prev_stamp = stamp
+        remaining_time = dt
+        while remaining_time > 1e-9:
+            timestep = min(remaining_time, self.max_dt)
+            self.kf.predict(timestep)
+            remaining_time -= timestep
+
         elapsed = stamp - self.last_good_stamp
         xy_jump = sqrt((pos[0]-self.last_good_pos[0])**2 + (pos[1]-self.last_good_pos[1])**2)
         z_error = abs(pos[2] - self.EXPECTED_PLATFORM_HEIGHT)
@@ -119,16 +123,6 @@ class PlatformKalmanFilterNode(Node):
         self.healthline_window.append(ok)
         healthy = len(self.healthline_window) >= 120 and np.mean(self.healthline_window) >= 0.8
         self.healthline_pub.publish(Bool(data=bool(healthy)))
-        
-        if self.reject_count >= self.max_rejections:
-            self.get_logger().warn("Platform KF has rejected 0.5s of measurements", throttle_duration_sec = 1.0)
-            # reset kalman filter if last measurement is sensible
-            if abs(msg.position[2] - self.EXPECTED_PLATFORM_HEIGHT) < 0.05:
-                self.get_logger().info("Resetting platform kalman filter")
-                self.kf.initialise(msg.position)
-                self.kf.kf.P = np.diag([self.P_pos_init] * 3 + [self.P_vel_init] * 3)
-                self.reject_count = 0
-                self.healthline_window.clear()
 
         observed_state = PlatformState()
         observed_state.header = msg.header
