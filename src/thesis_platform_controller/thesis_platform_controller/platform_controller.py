@@ -5,6 +5,12 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import TwistStamped
 import math
 import numpy as np
+from enum import Enum
+
+class PATH_TYPE(Enum):
+    CIRCLE = 0
+    LINE = 1
+    SNAKE = 2
 
 class PlatformController(Node):
     def __init__(self):
@@ -14,7 +20,6 @@ class PlatformController(Node):
 
         self.cmd_publisher = self.create_publisher(TwistStamped, '/cmd_vel', cmd_qos)
         self.subcriber = self.create_subscription(PlatformState, '/measured_platform_state', self.state_callback, state_qos)
-        self.timer = self.create_timer(0.05, self.simple_circle_path)
         self.pred_publisher = self.create_publisher(PlatformPrediction, '/platform_prediction', cmd_qos)
 
         self.centre = None
@@ -27,9 +32,23 @@ class PlatformController(Node):
         self.pred_dt = 0.05
         self.pred_N = 40
 
-        # actuator limits
         self.MAX_V = 0.3
         self.MAX_W = 1.9
+
+        self.declare_parameter('PATH_TYPE', 'circle')
+        path_type = str(self.get_parameter('PATH_TYPE').value).lower()
+        if 'line' in path_type:
+            self.path_type = PATH_TYPE.LINE
+            self.command_callback = self.line_path
+            self.LINE_DISTANCE = 1.5
+        elif 'snake' in path_type:
+            self.path_type = PATH_TYPE.SNAKE
+            self.command_callback = self.snake_path
+        else:
+            self.path_type = PATH_TYPE.CIRCLE
+            self.command_callback  = self.simple_circle_path
+
+        self.timer = self.create_timer(0.05, self.command_callback)
         
         self.declare_parameter('RADIUS', 0.8)
         self.radius = float(self.get_parameter('RADIUS').value)
@@ -48,7 +67,8 @@ class PlatformController(Node):
 
         self.pose = None
         self.start_time = None
-        self.get_logger().info("Platform Controller node has begun!")
+        self.calibration_finished_time = None
+        self.get_logger().info(f"Platform Controller node has begun! Path type {self.path_type}")
         self.get_logger().info(f"Commanding linspeed of {self.linear_speed} and omega {self.omega}")
 
 
@@ -56,13 +76,6 @@ class PlatformController(Node):
         cx, cy = self.centre
         phi = self.omega * t + self.yaw_offset
         return cx + self.model_radius * math.cos(phi), cy + self.model_radius * math.sin(phi)
-
-    def predict_at(self, t):
-        cx, cy = self.centre
-        phi = self.omega * t + self.yaw_offset
-        r = self.model_radius + self.off_r
-        delta_phi = self.off_t / self.model_radius
-        return cx + r * math.cos(phi + delta_phi), cy + r * math.sin(phi + delta_phi)
 
 
     def initial_calibration(self, x, y, yaw):
@@ -76,7 +89,7 @@ class PlatformController(Node):
         y_avg = sum(self.starting_ys) / len(self.starting_ys)
         yaw_avg = sum(self.starting_yaws) / len(self.starting_yaws)
         self.centre = (x_avg - self.radius * math.sin(yaw_avg), y_avg + self.radius * math.cos(yaw_avg))
-        self.start_time = self.get_clock().now()
+        self.calibration_finished_time = self.get_clock().now()
         self.yaw_offset = yaw_avg - math.pi/2
         self.get_logger().info(f"Centre: {self.centre}, Yaw Offset: {self.yaw_offset}")
         
@@ -86,9 +99,11 @@ class PlatformController(Node):
         ts, xs, ys = arr[:, 0], arr[:, 1], arr[:, 2]
 
         # fits cx, cy and radius to measured x, y via linear least squares (just expanding (x-cx)^2+(y-cy)^2=r^2)
-        A = np.c_[2 * xs, 2 * ys, np.ones(len(xs))]
-        (cx, cy, c), *_ = np.linalg.lstsq(A, xs ** 2 + ys ** 2, rcond=None)
-        r = math.sqrt(max(c + cx * cx + cy * cy, 1e-9))
+        A = np.column_stack((2*xs, 2*ys, np.ones(len(xs))))
+        b = xs**2 + ys**2
+        result = np.linalg.lstsq(A, b, rcond=None)
+        cx, cy, c = result[0]
+        r = math.sqrt(c + cx**2 + cy**2)
 
         if len(ts) < 20 or not (0.5 * self.radius < r < 2.0 * self.radius):
             self.get_logger().warn(f"Refit rejected: {len(ts)} samples, fitted radius {r:.3f} m ")
@@ -96,7 +111,7 @@ class PlatformController(Node):
             return
 
         self.refit_done = True
-        moved = math.hypot(cx - self.centre[0], cy - self.centre[1])
+        moved = math.sqrt((cx - self.centre[0])**2 + (cy - self.centre[1])**2)
         self.centre = (float(cx), float(cy))
         self.model_radius = r
         self.yaw_offset = (math.atan2(ys[-1] - cy, xs[-1] - cx) - self.omega * float(ts[-1]))
@@ -128,13 +143,14 @@ class PlatformController(Node):
                 
             self.pose = (x, y, z, yaw)
             self.last_pose_time = self.get_clock().now()
-
             if self.centre is None:
                 self.initial_calibration(x, y, yaw)
                 return
-
+            if self.start_time is None or self.path_type != PATH_TYPE.CIRCLE:
+                return
 
             t = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+
             if not self.refit_done:
                 self.refit_points.append((t, x, y))
                 if t > self.REFIT_AFTER:
@@ -154,7 +170,6 @@ class PlatformController(Node):
 
       
     def pose_age(self):
-        # seconds since last accepted mocap measurement
         if self.last_pose_time is None: 
             return float('inf')
         return (self.get_clock().now() - self.last_pose_time).nanoseconds * 1e-9
@@ -166,7 +181,10 @@ class PlatformController(Node):
             return
         
         now = self.get_clock().now()
-        delta_t = (now - self.start_time).nanoseconds * 1e-9
+        if self.start_time is None:
+            elapsed = (now - self.calibration_finished_time).nanoseconds * 1e-9
+            if elapsed < 1.0: return
+            self.start_time = now
 
         cmd = TwistStamped()
         cmd.header.stamp = now.to_msg()
@@ -174,14 +192,58 @@ class PlatformController(Node):
         cmd.twist.linear.x = float(self.linear_speed)
         cmd.twist.angular.z = float(self.omega)
         self.cmd_publisher.publish(cmd)
-
-        lookahead = 2.0
-        pred_x, pred_y = self.predict_at(delta_t + lookahead)
-        nx, ny = self.nominal_at(delta_t)
-        age = self.pose_age()
         self.publish_prediction()
 
-        # self.get_logger().info(f"Current: ({self.pose[0]:.3f}, {self.pose[1]:.3f}) | Expected: ({nx:.3f}, {ny:.3f}) | Offset: r={self.off_r:.3f}, t={self.off_t:.3f} | Predicted: ({pred_x:.3f}, {pred_y:.3f}) | age={age:.2f}s")
+
+    def snake_path(self):
+        now = self.get_clock().now()
+        t = (now - self.start_time).nanoseconds * 1e-9
+        
+        cmd = TwistStamped()
+        cmd.header.stamp = now.to_msg()
+        cmd.header.frame_id = 'base_link'
+
+        if self.start_time is None:
+            elapsed = (now - self.calibration_finished_time).nanoseconds * 1e-9
+            if elapsed < 1.0:
+                self.cmd_publisher.publish(cmd)
+                return
+            self.start_time = now
+        cmd.twist.linear.x = float(self.linear_speed)
+        cmd.twist.angular.z = 0.3 * math.sin(2*math.pi*t / 8.0)
+        self.cmd_publisher.publish(cmd)
+
+    
+    def line_path(self):
+        now = self.get_clock().now()
+        cmd = TwistStamped()
+        cmd.header.stamp = now.to_msg()
+        cmd.header.frame_id = 'base_link'
+
+        if self.start_time is None:
+            elapsed = (now - self.calibration_finished_time).nanoseconds * 1e-9
+            if elapsed < 1.0:
+                self.cmd_publisher.publish(cmd)
+                return
+            self.start_time = now
+
+        t = (now - self.start_time).nanoseconds * 1e-9
+        travel_time = self.LINE_DISTANCE / self.linear_speed
+        cycle_time = 2 * (travel_time + 0.5)
+        t = t % cycle_time
+
+        if t < travel_time:
+            cmd.twist.linear.x = self.linear_speed
+        elif t < travel_time + 0.5:
+            cmd.twist.linear.x = 0.0
+        elif t < 2 * travel_time + 0.5:
+            cmd.twist.linear.x = -self.linear_speed
+        else: 
+            cmd.twist.linear.x = 0.0
+
+        cmd.twist.angular.z = 0.0
+        self.cmd_publisher.publish(cmd)
+
 
 
     def publish_prediction(self):

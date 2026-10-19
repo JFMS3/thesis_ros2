@@ -43,9 +43,15 @@ def generate_launch_description():
         default_value='0.1',
         description='Linear speed of the platform'
     )
+    declare_path_type = DeclareLaunchArgument(
+        'path_type',
+        default_value='circle',
+        description='Type of path for platform to follow (circle, line or S-shape)'
+    )
     reference_preview_enabled = LaunchConfiguration('reference_preview_enabled')
     radius = LaunchConfiguration('radius')
     linspeed = LaunchConfiguration('linspeed')
+    path_type = LaunchConfiguration('path_type')
 
 
     mpc_node = Node(
@@ -76,7 +82,8 @@ def generate_launch_description():
         output='screen',
         parameters=[platform_yaml_path, {
             'RADIUS': radius,
-            'LINSPEED': linspeed
+            'LINSPEED': linspeed,
+            'PATH_TYPE': path_type
         }]
     )
     
@@ -111,6 +118,7 @@ def generate_launch_description():
         declare_reference_preview,
         declare_radius,
         declare_linspeed,
+        declare_path_type,
 
         mpc_node,
         flight_control_node,
