@@ -128,7 +128,7 @@ usbipd detach --busid <BUS_ID>
 # Troubleshooting
 
 ### Why is my drone not arming anymore?
-Did you crash it? If so, you cannot arm it again until you turn it off and on again. You can tell if it is in this 'bricked' state if it has a static red light on one of its legs. Press the on button to turn it off and then on.
+Did you crash it? If so, you cannot arm it again until you turn it off and on again. You can tell if it is in this 'bricked' state if it has a static red light on one of its legs (could also mean it has low battery). Press the on button to turn it off and then on.
 
 **It is best to turn the drone off and on after every run!**
 

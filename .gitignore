@@ -6,3 +6,4 @@ analysis-venv/
 c_generated_code_quad_ocp/
 c_generated_code_quad_sim/
 src/thesis_mpc_controller/thesis_mpc_controller/__pycache__/
+*.csv

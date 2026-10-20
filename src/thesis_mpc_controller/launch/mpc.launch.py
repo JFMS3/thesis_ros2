@@ -60,7 +60,8 @@ def generate_launch_description():
         name='mpc_node',
         output='screen',
         parameters=[mpc_yaml_path, {
-            'reference_preview_enabled': reference_preview_enabled
+            'reference_preview_enabled': reference_preview_enabled,
+            'path_type': path_type
         }],
         arguments=['--ros-args', '--log-level', 'info']
     )

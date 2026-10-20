@@ -24,6 +24,11 @@ class MPCNode(Node):
         
         self.declare_parameter('reference_preview_enabled', True)
         self.reference_preview_enabled = self.get_parameter('reference_preview_enabled').value
+        
+        self.declare_parameter('PATH_TYPE', 'circle')
+        path_type = str(self.get_parameter('PATH_TYPE').value).lower()
+        if 'loops' in path_type:
+            self.reference_preview_enabled = False
 
         self.declare_parameter('fs', 20)
         self.fs = self.get_parameter('fs').value
@@ -349,7 +354,7 @@ class MPCNode(Node):
     def control_loop(self):
         if not self.mpc_enabled:
             return
-        if self.platform_prediction is None or self.x_hat is None: 
+        if self.x_hat is None or self.platform_pos is None or self.platform_vel is None: 
             self.get_logger().warn("Waiting for state estimate and platform state", throttle_duration_sec=2)
             return
 

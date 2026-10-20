@@ -216,7 +216,6 @@ class FlightControlNode(Node):
 
     def sequence_callback(self, msg: QuadcopterState):
         now = self.get_clock().now()
-        
         x = msg.position[0]
         y = msg.position[1]
         z = msg.position[2]
@@ -225,7 +224,7 @@ class FlightControlNode(Node):
             self.imu_phi is not None and self.imu_theta is not None and
             abs(self.imu_phi) < radians(10) and abs(self.imu_theta) < radians(10)
         )
-        #self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(phi):.2f}, THETA: {degrees(theta):.2f}")
+        #self.get_logger().info(f"ATTITUDE OK: {attitude_ok}, PHI: {degrees(self.imu_phi):.2f}, THETA: {degrees(self.imu_theta):.2f}")
         self.attitude_health.append(attitude_ok)
         
         if not self.got_first_state:
@@ -355,7 +354,7 @@ class FlightControlNode(Node):
             if self.time_elapsed() > 5:
                 quadcopter_attitude_healthy = len(self.attitude_health) >= 120 and sum(self.attitude_health)/120 >= 0.7
                 if not quadcopter_attitude_healthy:
-                    self.get_logger().warn("Initial Optitrack attitude not level, aborting...")
+                    self.get_logger().warn("Initial attitude not level, aborting...")
                     self.enter_state(QuadcopterSequence.DONE)
                     return
                 

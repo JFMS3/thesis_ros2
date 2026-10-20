@@ -6,11 +6,12 @@ from geometry_msgs.msg import TwistStamped
 import math
 import numpy as np
 from enum import Enum
+import csv
 
 class PATH_TYPE(Enum):
     CIRCLE = 0
     LINE = 1
-    SNAKE = 2
+    LOOPS = 2
 
 class PlatformController(Node):
     def __init__(self):
@@ -40,10 +41,9 @@ class PlatformController(Node):
         if 'line' in path_type:
             self.path_type = PATH_TYPE.LINE
             self.command_callback = self.line_path
-            self.LINE_DISTANCE = 1.5
-        elif 'snake' in path_type:
-            self.path_type = PATH_TYPE.SNAKE
-            self.command_callback = self.snake_path
+        elif 'loops' in path_type:
+            self.path_type = PATH_TYPE.LOOPS
+            self.command_callback = self.loops_path
         else:
             self.path_type = PATH_TYPE.CIRCLE
             self.command_callback  = self.simple_circle_path
@@ -56,10 +56,27 @@ class PlatformController(Node):
         self.linear_speed = min(self.MAX_V, float(self.get_parameter('LINSPEED').value))
         self.omega = min(self.MAX_W, self.linear_speed / self.radius)
 
+        # circle path
         self.model_radius = self.radius # what the model thinks the radius is
         self.refit_points = [] # once bot has driven a decent arc, fit circle to measured positions
         self.refit_done = False
         self.REFIT_AFTER = 5.0
+
+        # line path
+        self.LINE_DISTANCE = 2
+        self.TRAVEL_TIME = self.LINE_DISTANCE / self.linear_speed
+        self.ANGULAR_SPEED = 0.75
+        self.TURN_TIME = 3.142 / self.ANGULAR_SPEED
+        self.TOTAL_CYCLE_TIME = self.TRAVEL_TIME + self.TURN_TIME
+        self.cycle_starting_x = None
+        self.cycle_final_x = None
+        self.direction = 1
+        self.direction_flipped = False
+
+        # loops path
+        self.HALF_LOOP_TIME = 2 * math.pi / self.omega
+        self.loop_direction = 1
+
 
         self.YAW_JUMP_LIMIT = math.radians(90)
         self.last_pose_time = None
@@ -71,6 +88,11 @@ class PlatformController(Node):
         self.get_logger().info(f"Platform Controller node has begun! Path type {self.path_type}")
         self.get_logger().info(f"Commanding linspeed of {self.linear_speed} and omega {self.omega}")
 
+        self.pred_log = open('line_prediction.csv', 'w', newline="", buffering=1)
+        self.pred_writer = csv.writer(self.pred_log)
+        self.pred_writer.writerow([
+            'time', 'type', 'horizon', 'x', 'y', 'vx', 'vy', 'yaw'
+        ])
 
     def nominal_at(self, t):
         cx, cy = self.centre
@@ -143,10 +165,17 @@ class PlatformController(Node):
                 
             self.pose = (x, y, z, yaw)
             self.last_pose_time = self.get_clock().now()
+            now = self.get_clock().now().nanoseconds * 1e-9
+            self.pred_writer.writerow([now, 'measured', 0, x, y, '', '', yaw])
+            if self.path_type != PATH_TYPE.CIRCLE:
+                if self.calibration_finished_time is None:
+                    self.calibration_finished_time = self.get_clock().now()
+                return
+
             if self.centre is None:
                 self.initial_calibration(x, y, yaw)
                 return
-            if self.start_time is None or self.path_type != PATH_TYPE.CIRCLE:
+            if self.start_time is None:
                 return
 
             t = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
@@ -192,16 +221,17 @@ class PlatformController(Node):
         cmd.twist.linear.x = float(self.linear_speed)
         cmd.twist.angular.z = float(self.omega)
         self.cmd_publisher.publish(cmd)
-        self.publish_prediction()
+        self.publish_circle_prediction()
 
 
-    def snake_path(self):
+    def loops_path(self):
         now = self.get_clock().now()
-        t = (now - self.start_time).nanoseconds * 1e-9
-        
         cmd = TwistStamped()
         cmd.header.stamp = now.to_msg()
         cmd.header.frame_id = 'base_link'
+        if self.calibration_finished_time is None:
+            self.cmd_publisher.publish(cmd)
+            return
 
         if self.start_time is None:
             elapsed = (now - self.calibration_finished_time).nanoseconds * 1e-9
@@ -209,8 +239,13 @@ class PlatformController(Node):
                 self.cmd_publisher.publish(cmd)
                 return
             self.start_time = now
+        
+        t = (now - self.start_time).nanoseconds * 1e-9
+        current_cycle_index = int(t//self.HALF_LOOP_TIME)
+        self.loop_direction = 1 if (current_cycle_index % 2 == 0) else -1
+            
         cmd.twist.linear.x = float(self.linear_speed)
-        cmd.twist.angular.z = 0.3 * math.sin(2*math.pi*t / 8.0)
+        cmd.twist.angular.z = float(self.loop_direction * self.omega)
         self.cmd_publisher.publish(cmd)
 
     
@@ -219,6 +254,9 @@ class PlatformController(Node):
         cmd = TwistStamped()
         cmd.header.stamp = now.to_msg()
         cmd.header.frame_id = 'base_link'
+        if self.calibration_finished_time is None:
+            self.cmd_publisher.publish(cmd)
+            return
 
         if self.start_time is None:
             elapsed = (now - self.calibration_finished_time).nanoseconds * 1e-9
@@ -227,26 +265,26 @@ class PlatformController(Node):
                 return
             self.start_time = now
 
+        if self.pose_age() > self.stale_limit:
+            self.cmd_publisher.publish(cmd)
+            return
+
         t = (now - self.start_time).nanoseconds * 1e-9
-        travel_time = self.LINE_DISTANCE / self.linear_speed
-        cycle_time = 2 * (travel_time + 0.5)
-        t = t % cycle_time
-
-        if t < travel_time:
-            cmd.twist.linear.x = self.linear_speed
-        elif t < travel_time + 0.5:
-            cmd.twist.linear.x = 0.0
-        elif t < 2 * travel_time + 0.5:
-            cmd.twist.linear.x = -self.linear_speed
-        else: 
-            cmd.twist.linear.x = 0.0
-
-        cmd.twist.angular.z = 0.0
+        v, w = self.line_path_velocities(t)
+        cmd.twist.linear.x = float(v)
+        cmd.twist.angular.z = float(w)
         self.cmd_publisher.publish(cmd)
+        self.publish_line_prediction(t)
 
 
+    def line_path_velocities(self, t):
+        cycle_t = t % self.TOTAL_CYCLE_TIME
+        if cycle_t < self.TRAVEL_TIME:
+            return self.linear_speed, 0.0
+        return 0.0, self.ANGULAR_SPEED
 
-    def publish_prediction(self):
+
+    def publish_circle_prediction(self):
         if self.centre is None or self.pose is None or self.start_time is None:
             return
 
@@ -284,6 +322,57 @@ class PlatformController(Node):
         msg.vy = vys
         msg.vz = vzs
         self.pred_publisher.publish(msg)
+
+
+    def publish_line_prediction(self, t):
+        if self.pose is None or self.start_time is None:
+            return
+
+        msg = PlatformPrediction()
+        now = self.get_clock().now()
+        msg.header.stamp = now.to_msg()
+        msg.dt = self.pred_dt
+        msg.n = self.pred_N
+
+        x, y, z, yaw = self.pose
+        xs, ys, vxs, vys = [], [], [], []
+        zs = [z] * (self.pred_N + 1)
+        vzs = [0.0] * (self.pred_N + 1)
+        yaws = []
+
+        for i in range(self.pred_N + 1):
+            future_t = t + i * self.pred_dt
+            v, w = self.line_path_velocities(future_t)
+            heading = yaw + 2.8
+            vx = v * math.cos(heading)
+            vy = v * math.sin(heading)
+
+            xs.append(x)
+            ys.append(y)
+            vxs.append(vx)
+            vys.append(vy)
+            yaws.append(yaw)
+            x += vx * self.pred_dt
+            y += vy * self.pred_dt
+            yaw -= w * self.pred_dt
+    
+        msg.x = xs
+        msg.y = ys
+        msg.z = zs
+        msg.vx = vxs
+        msg.vy = vys
+        msg.vz = vzs
+        
+        t_now = now.nanoseconds * 1e-9
+        for i in range(0, self.pred_N + 1, 10):
+            tau = i * self.pred_dt
+            self.pred_writer.writerow([
+                t_now+tau,'prediction', tau, msg.x[i], msg.y[i], msg.vx[i], msg.vy[i], yaws[i]
+            ])
+        self.pred_publisher.publish(msg)
+
+    
+    
 
 
 
