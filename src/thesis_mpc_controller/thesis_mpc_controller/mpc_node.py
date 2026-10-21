@@ -148,7 +148,8 @@ class MPCNode(Node):
         self.log_writer = csv.writer(self.log_file)
         self.log_writer.writerow([
             "time", "x", "y", "z", "vx", "vy", "vz",
-            "phi", "theta", "ref_x", "ref_y", "ref_z",
+            "phi", "theta", "mpc_mode",
+            "ref_x", "ref_y", "ref_z", "ref_vx", "ref_vy", "ref_vz",
             "phi_cmd", "theta_cmd", "thrust_dev", "solver_status",
         ])
 
@@ -396,7 +397,9 @@ class MPCNode(Node):
         self.log_writer.writerow([
             now.nanoseconds * 1e-9, self.x_hat[0], self.x_hat[1], self.x_hat[2],
             self.x_hat[3], self.x_hat[4], self.x_hat[5], self.x_hat[6], self.x_hat[7],
-            refs[0, 0], refs[0, 1], refs[0, 2], u_opt[0], u_opt[1], u_opt[2], solver_status,
+            self.mpc_mode, refs[0, 0], refs[0, 1], refs[0, 2], 
+            refs[0, 3], refs[0, 4], refs[0, 5],
+            u_opt[0], u_opt[1], u_opt[2], solver_status,
         ])
 
         if self.ocp_solver.status != 0:
