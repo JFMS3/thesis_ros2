@@ -25,7 +25,7 @@ class QuadcopterKalmanFilterNode(Node):
         self.declare_parameter('P_vel_init', 0.1)
         self.declare_parameter('nis_threshold', 16)
         self.declare_parameter('max_dt', 0.1)
-        self.declare_parameter('R_pos_scalar', 1000)
+        self.declare_parameter('R_pos_scalar', 250)
 
         R_pos_scalar = float(self.get_parameter('R_pos_scalar').value)
         R_pos_raw = self.get_parameter('R_pos').value

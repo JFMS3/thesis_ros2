@@ -10,7 +10,6 @@ from pathlib import Path
 def generate_launch_description():
     mpc_package_name = 'thesis_mpc_controller'
     platform_package_name = 'thesis_platform_controller'
-    optitrack_package_name = 'thesis_optitrack_bridge'
     
     run_name = datetime.now().strftime("mpc_%m-%d_%H-%M")
     log_dir = str(Path.home() / "thesis_logs" / run_name)
@@ -61,7 +60,8 @@ def generate_launch_description():
         output='screen',
         parameters=[mpc_yaml_path, {
             'reference_preview_enabled': reference_preview_enabled,
-            'path_type': path_type
+            'path_type': path_type,
+            'log_dir': log_dir
         }],
         arguments=['--ros-args', '--log-level', 'info']
     )
@@ -108,13 +108,6 @@ def generate_launch_description():
         }]
     )
 
-    optitrack_bridge_node = Node(
-        package=optitrack_package_name,
-        executable='optitrack_bridge',
-        name='optitrack_bridge',
-        output='screen'
-    )
-
     return LaunchDescription([
         declare_reference_preview,
         declare_radius,
@@ -125,6 +118,5 @@ def generate_launch_description():
         flight_control_node,
         platform_kalman_filter_node,
         platform_controller_node,
-        quadcopter_kalman_filter_node,
-        #optitrack_bridge_node
+        quadcopter_kalman_filter_node
     ])

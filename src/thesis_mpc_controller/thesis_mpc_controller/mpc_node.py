@@ -45,15 +45,27 @@ class MPCNode(Node):
         self.declare_parameter('tau_phi', 94.6e-4)
         self.declare_parameter('tau_theta', 94.6e-4)
         self.declare_parameter('landing_mode_weights', [12, 12, 8, 2, 2, 3, 0, 0])
+        self.declare_parameter('landing_mode_phi_max', 3)
+        self.declare_parameter('landing_mode_theta_max', 3)
+        self.declare_parameter('landing_mode_Tdev_max', 0.05)
         self.declare_parameter('tracking_mode_weights', [7, 7, 5, 3, 3, 3, 0, 0])
+        self.declare_parameter('tracking_mode_phi_max', 8)
+        self.declare_parameter('tracking_mode_theta_max', 8)
+        self.declare_parameter('tracking_mode_Tdev_max', 0.05)
 
         Ax = float(self.get_parameter('Ax').value)
         Ay = float(self.get_parameter('Ay').value)
         Az = float(self.get_parameter('Az').value)
         tau_phi = float(self.get_parameter('tau_phi').value)
         tau_theta = float(self.get_parameter('tau_theta').value)      
-        self.landing_mode_weights = [float(w) for w in self.get_parameter('landing_mode_weights').value]        
+        self.landing_mode_weights = [float(w) for w in self.get_parameter('landing_mode_weights').value]
+        self.landing_mode_phi_max = float(self.get_parameter('landing_mode_phi_max').value)
+        self.landing_mode_theta_max = float(self.get_parameter('landing_mode_theta_max').value)
+        self.landing_mode_Tdev_max = float(self.get_parameter('landing_mode_Tdev_max').value)
         self.tracking_mode_weights = [float(w) for w in self.get_parameter('tracking_mode_weights').value]
+        self.tracking_mode_phi_max = float(self.get_parameter('tracking_mode_phi_max').value)
+        self.tracking_mode_theta_max = float(self.get_parameter('tracking_mode_theta_max').value)
+        self.tracking_mode_Tdev_max = float(self.get_parameter('tracking_mode_Tdev_max').value)
   
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -139,7 +151,11 @@ class MPCNode(Node):
             MPCCommand, '/mpc_cmd', 10
         )
 
-        log_dir = Path.home() / "preliminary_mpc_logs"
+        self.declare_parameter('log_dir', '')
+        log_dir = self.get_parameter('log_dir').value
+        if log_dir: log_dir = Path(log_dir)
+        else: log_dir = Path('log')
+        
         log_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = log_dir / f"mpc_{timestamp}.csv"
@@ -155,6 +171,10 @@ class MPCNode(Node):
 
         self.get_logger().info(f"MPC node has begun! Reference preview {'enabled' if self.reference_preview_enabled else 'disabled'}")
         self.get_logger().info(f"Logging MPC data to {log_path}")
+        self.get_logger().info(f"Landing mode parameters:")
+        self.get_logger().info(f"Weights: {self.landing_mode_weights}, phi_max: {self.landing_mode_phi_max}, theta_max: {self.landing_mode_theta_max}, T_dev: {self.landing_mode_Tdev_max}")
+        self.get_logger().info(f"Tracking mode parameters:")
+        self.get_logger().info(f"Weights: {self.tracking_mode_weights}, phi_max: {self.tracking_mode_phi_max}, theta_max: {self.tracking_mode_theta_max}, T_dev: {self.tracking_mode_Tdev_max}")
 
 
     def quadcopter_callback(self, msg: QuadcopterState):
@@ -330,15 +350,15 @@ class MPCNode(Node):
     def update_mpc_weights(self):
         if self.mpc_mode == MPC_MODE.LANDING:
             Q_mat = np.diag(self.landing_mode_weights)
-            phi_max = np.deg2rad(3)
-            theta_max = np.deg2rad(3)
-            Tdev_max = 0.05
+            phi_max = np.deg2rad(self.landing_mode_phi_max)
+            theta_max = np.deg2rad(self.landing_mode_theta_max)
+            Tdev_max = self.landing_mode_Tdev_max
 
         else:
             Q_mat = np.diag(self.tracking_mode_weights)
-            phi_max = np.deg2rad(8)
-            theta_max = np.deg2rad(8)
-            Tdev_max = 0.05
+            phi_max = np.deg2rad(self.tracking_mode_phi_max)
+            theta_max = np.deg2rad(self.tracking_mode_theta_max)
+            Tdev_max = self.tracking_mode_Tdev_max
         
         R_mat = np.diag([0.1, 0.1, 0.1])
         W = block_diag(Q_mat, R_mat)
