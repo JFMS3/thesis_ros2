@@ -164,7 +164,7 @@ class MPCNode(Node):
         self.log_writer = csv.writer(self.log_file)
         self.log_writer.writerow([
             "time", "x", "y", "z", "vx", "vy", "vz",
-            "phi", "theta", "mpc_mode",
+            "phi", "theta", "mpc_mode", "mpc_enabled",
             "ref_x", "ref_y", "ref_z", "ref_vx", "ref_vy", "ref_vz",
             "phi_cmd", "theta_cmd", "thrust_dev", "solver_status",
         ])
@@ -267,7 +267,6 @@ class MPCNode(Node):
             self.enter_landing_sample_count = 0
             self.exit_landing_sample_count = 0
             self.get_logger().info("MPC mode active")
-            self.ref_offset = None
             self.mpc_enabled_at = self.get_clock().now()
 
 
@@ -360,7 +359,7 @@ class MPCNode(Node):
             theta_max = np.deg2rad(self.tracking_mode_theta_max)
             Tdev_max = self.tracking_mode_Tdev_max
         
-        R_mat = np.diag([0.1, 0.1, 0.1])
+        R_mat = np.diag([0.2, 0.2, 0.1])
         W = block_diag(Q_mat, R_mat)
         lbu = np.array([-phi_max, -theta_max, -Tdev_max])
         ubu = np.array([phi_max, theta_max, Tdev_max])
@@ -417,7 +416,7 @@ class MPCNode(Node):
         self.log_writer.writerow([
             now.nanoseconds * 1e-9, self.x_hat[0], self.x_hat[1], self.x_hat[2],
             self.x_hat[3], self.x_hat[4], self.x_hat[5], self.x_hat[6], self.x_hat[7],
-            self.mpc_mode, refs[0, 0], refs[0, 1], refs[0, 2], 
+            self.mpc_mode, self.mpc_enabled, refs[0, 0], refs[0, 1], refs[0, 2], 
             refs[0, 3], refs[0, 4], refs[0, 5],
             u_opt[0], u_opt[1], u_opt[2], solver_status,
         ])

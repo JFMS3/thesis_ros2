@@ -24,7 +24,7 @@
     tau_phi: 94.6e-3
     tau_theta: 94.6e-3
     m: 0.04
-    landing_mode_weights: [12, 12, 8, 2, 2, 3, 0, 0]
+    landing_mode_weights: [12, 12, 8, 4, 4, 3, 0, 0]
     landing_mode_phi_max: 3
     landing_mode_theta_max: 3
     landing_mode_Tdev_max: 0.05
