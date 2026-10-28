@@ -15,6 +15,8 @@ class PositionVelocityKalmanFilter:
         self.max_dt = max_dt
         for i in range(3):
             self.kf.H[i, i] = 1.0 # i.e. only positions are known
+        self.innovation = None
+        self.innovation_covariance = None
 
 
     def initialise(self, pos):
@@ -27,7 +29,7 @@ class PositionVelocityKalmanFilter:
         Q = np.zeros((6, 6))
         F = np.eye(6)
         for i in range(3):
-            F[i, i+3] = dt # dx = vx * dt
+            F[i, i+3] = dt
             accel_uncertainty = Q_discrete_white_noise(dim=2, dt=dt, var=self.sigma_accel[i]**2)
             Q[i, i] = accel_uncertainty[0, 0]
             Q[i, i+3] = accel_uncertainty[0, 1]
@@ -42,10 +44,10 @@ class PositionVelocityKalmanFilter:
         pos_measured = np.asarray(pos, float)
         if not np.all(np.isfinite(pos_measured)):
             return np.nan, False
-        # self.kf.x is where model thinks we are and we extract the position by multiplying by H.
-        innovation = pos_measured - self.kf.H @ self.kf.x
-        innovation_covariance = self.kf.H @ self.kf.P @ self.kf.H.T + self.kf.R
-        nis = float(innovation @ np.linalg.solve(innovation_covariance, innovation))
+        
+        self.innovation = pos_measured - self.kf.H @ self.kf.x
+        self.innovation_covariance = self.kf.H @ self.kf.P @ self.kf.H.T + self.kf.R
+        nis = float(self.innovation @ np.linalg.solve(self.innovation_covariance, self.innovation))
 
         if nis_threshold is not None and nis > nis_threshold:
             return nis, False
@@ -54,4 +56,4 @@ class PositionVelocityKalmanFilter:
     
 
     def get_state(self):
-        return self.kf.x.copy() 
+        return self.kf.x.copy()

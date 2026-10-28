@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from enum import Enum
 from scipy.linalg import block_diag
+import time
 
 class MPC_MODE(Enum):
     TRACKING = 0
@@ -166,7 +167,11 @@ class MPCNode(Node):
             "time", "x", "y", "z", "vx", "vy", "vz",
             "phi", "theta", "mpc_mode", "mpc_enabled",
             "ref_x", "ref_y", "ref_z", "ref_vx", "ref_vy", "ref_vz",
-            "phi_cmd", "theta_cmd", "thrust_dev", "solver_status",
+            "phi_cmd", "theta_cmd", "thrust_dev",
+            "solver_status", 'solver_time', "total_control_time",
+            "platform_x", "platform_y", "platform_z",
+            "platform_vx", "platform_vy", "platform_vz",
+            "xy_error", "z_error", "relative_xy_vel",
         ])
 
         self.get_logger().info(f"MPC node has begun! Reference preview {'enabled' if self.reference_preview_enabled else 'disabled'}")
@@ -372,6 +377,8 @@ class MPCNode(Node):
 
 
     def control_loop(self):
+        control_loop_start = time.perf_counter()
+        now = self.get_clock().now().nanoseconds * 1e-9
         if not self.mpc_enabled:
             return
         if self.x_hat is None or self.platform_pos is None or self.platform_vel is None: 
@@ -411,29 +418,34 @@ class MPCNode(Node):
 
         u_opt = self.ocp_solver.solve_for_x0(x0_bar=self.x_hat, fail_on_nonzero_status=False)
         solver_status = self.ocp_solver.status
-        now = self.get_clock().now()
+        solver_time = self.ocp_solver.get_stats('time_tot')
 
-        self.log_writer.writerow([
-            now.nanoseconds * 1e-9, self.x_hat[0], self.x_hat[1], self.x_hat[2],
-            self.x_hat[3], self.x_hat[4], self.x_hat[5], self.x_hat[6], self.x_hat[7],
-            self.mpc_mode, self.mpc_enabled, refs[0, 0], refs[0, 1], refs[0, 2], 
-            refs[0, 3], refs[0, 4], refs[0, 5],
-            u_opt[0], u_opt[1], u_opt[2], solver_status,
-        ])
-
-        if self.ocp_solver.status != 0:
+        if self.ocp_solver.status == 0:
+            cmd = MPCCommand()
+            cmd.header.stamp = self.get_clock().now().to_msg()
+            cmd.phi_cmd = float(u_opt[0])
+            cmd.theta_cmd = float(u_opt[1])
+            cmd.thrust_dev = float(u_opt[2])
+            if not isfinite(cmd.phi_cmd) or not isfinite(cmd.theta_cmd) or not isfinite(cmd.thrust_dev):
+                self.get_logger().error("Invalid MPC command")
+                return
+            self.cmd_publisher.publish(cmd)
+        else:
             self.get_logger().warn(f'MPC solver failed with status {self.ocp_solver.status}')
-            return
 
-        cmd = MPCCommand()
-        cmd.header.stamp = self.get_clock().now().to_msg()
-        cmd.phi_cmd = float(u_opt[0])
-        cmd.theta_cmd = float(u_opt[1])
-        cmd.thrust_dev = float(u_opt[2])
-        if not isfinite(cmd.phi_cmd) or not isfinite(cmd.theta_cmd) or not isfinite(cmd.thrust_dev):
-            self.get_logger().error("Invalid MPC command")
-            return
-        self.cmd_publisher.publish(cmd)
+        total_loop_time = time.perf_counter() - control_loop_start
+        relative_speed = self.get_relative_vel()
+        self.log_writer.writerow([
+            now, self.x_hat[0], self.x_hat[1], self.x_hat[2], self.x_hat[3], 
+            self.x_hat[4], self.x_hat[5], self.x_hat[6], self.x_hat[7],
+            self.mpc_mode, self.mpc_enabled, refs[0, 0], refs[0, 1], refs[0, 2], 
+            refs[0, 3], refs[0, 4], refs[0, 5], u_opt[0], u_opt[1], u_opt[2], 
+            solver_status, solver_time, total_loop_time,
+            self.platform_pos[0], self.platform_pos[1], self.platform_pos[2],
+            self.platform_vel[0], self.platform_vel[1], self.platform_vel[2],
+            xy_error, z_error, relative_speed
+
+        ])
 
 
 

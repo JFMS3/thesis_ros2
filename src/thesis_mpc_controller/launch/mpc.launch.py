@@ -6,6 +6,8 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from datetime import datetime
 from pathlib import Path
+import yaml
+import csv
 
 def generate_launch_description():
     mpc_package_name = 'thesis_mpc_controller'
@@ -14,7 +16,7 @@ def generate_launch_description():
     run_name = datetime.now().strftime("mpc_%m-%d_%H-%M")
     log_dir = str(Path.home() / "thesis_logs" / run_name)
     Path(log_dir).mkdir(parents=True, exist_ok=True)
-    
+
     mpc_yaml_path = os.path.join(
         get_package_share_directory(mpc_package_name),
         'config',
@@ -51,6 +53,30 @@ def generate_launch_description():
     radius = LaunchConfiguration('radius')
     linspeed = LaunchConfiguration('linspeed')
     path_type = LaunchConfiguration('path_type')
+    
+    with open(mpc_yaml_path, 'r') as f:
+        mpc_yaml_data = yaml.safe_load(f)
+    mpc_params = mpc_yaml_data['/mpc_node']['ros__parameters']
+    quad_kf_params = mpc_yaml_data['/quadcopter_kf']['ros__parameters']
+
+    with open(platform_yaml_path, 'r') as f:
+        platform_yaml_data = yaml.safe_load(f)
+    platform_kf_params = platform_yaml_data['/platform_kalman_filter']['ros__parameters']
+
+    params_filename = os.path.join(log_dir, f'/params_{run_name}.csv')
+    with open(params_filename, 'w', newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(['node', 'variable', 'value'])
+        writer.writerow(['launch', 'reference_preview_enabled', reference_preview_enabled])
+        writer.writerow(['launch', 'radius', radius])
+        writer.writerow(['launch', 'linspeed', linspeed])
+        writer.writerow(['launch', 'path_type', path_type])
+        for name, value in mpc_params.items():
+            writer.writerow(['mpc', name, value])
+        for name, value in quad_kf_params.items():
+            writer.writerow(['quadcopter_kf', name, value])
+        for name, value in platform_kf_params.items():
+            writer.writerow(['platform_kf', name, value])
 
 
     mpc_node = Node(

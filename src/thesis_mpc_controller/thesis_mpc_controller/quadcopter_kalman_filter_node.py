@@ -77,7 +77,9 @@ class QuadcopterKalmanFilterNode(Node):
             't', 'dt', 'measured_x', 'measured_y', 'measured_z',
             'estimated_x', 'estimated_y', 'estimated_z',
             'estimated_vx', 'estimated_vy', 'estimated_vz',
-            'nis', 'measurement_accepted'
+            'nis', 'measurement_accepted',
+            "innovation_x", "innovation_y", "innovation_z",
+            "innovation_covariance_x", "innovation_covariance_y", "innovation_covariance_z",
         ])
 
 
@@ -119,16 +121,22 @@ class QuadcopterKalmanFilterNode(Node):
         observed_state = QuadcopterState()
         observed_state.header = msg.header
         x = self.kf.get_state()
+        innovation_x, innovation_y, innovation_z = self.kf.innovation
+        innovation_covar_x, innovation_covar_y, innovation_covar_z = np.diag(self.kf.innovation_covariance)
+
 
         self.kf_csv_writer.writerow([
             stamp, dt, msg.position[0], msg.position[1], msg.position[2],
-            x[0], x[1], x[2], x[3], x[4], x[5], nis, int(ok)
+            x[0], x[1], x[2], x[3], x[4], x[5], nis, int(ok),
+            innovation_x, innovation_y, innovation_z,
+            innovation_covar_x, innovation_covar_y, innovation_covar_z
         ])
         observed_state.position = [x[i] for i in range(3)]
         observed_state.velocity = [x[i] for i in range(3,6)]
         observed_state.attitude = [self.imu_phi, self.imu_theta]
         self.pub.publish(observed_state)
         self.nis_pub.publish(Float64(data=nis))
+
 
 def main():
     rclpy.init()
