@@ -74,7 +74,7 @@ class FlightControlNode(Node):
         self.MAX_ATTITUDE_DEG = float(self.get_parameter('MAX_ATTITUDE_DEG').value)
         self.declare_parameter('HOVER_DURATION', 3.0)
         self.HOVER_DURATION = float(self.get_parameter('HOVER_DURATION').value)
-        self.declare_parameter('HANDOVER_DURATION', 1.5)
+        self.declare_parameter('HANDOVER_DURATION', 1.0)
         self.HANDOVER_DURATION = float(self.get_parameter('HANDOVER_DURATION').value)
 
         self.declare_parameter('CRAZYFLIE_HOVER_THRUST', 39250)

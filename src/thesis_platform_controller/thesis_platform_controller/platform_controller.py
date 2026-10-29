@@ -11,7 +11,7 @@ import csv
 class PATH_TYPE(Enum):
     CIRCLE = 0
     LINE = 1
-    LOOPS = 2
+    SQUARE = 2
 
 class PlatformController(Node):
     def __init__(self):
@@ -35,26 +35,26 @@ class PlatformController(Node):
 
         self.MAX_V = 0.3
         self.MAX_W = 1.9
-
-        self.declare_parameter('PATH_TYPE', 'circle')
-        path_type = str(self.get_parameter('PATH_TYPE').value).lower()
-        if 'line' in path_type:
-            self.path_type = PATH_TYPE.LINE
-            self.command_callback = self.line_path
-        elif 'loops' in path_type:
-            self.path_type = PATH_TYPE.LOOPS
-            self.command_callback = self.loops_path
-        else:
-            self.path_type = PATH_TYPE.CIRCLE
-            self.command_callback  = self.simple_circle_path
-
-        self.timer = self.create_timer(0.05, self.command_callback)
         
         self.declare_parameter('RADIUS', 0.8)
         self.radius = float(self.get_parameter('RADIUS').value)
         self.declare_parameter('LINSPEED', 0.1)
         self.linear_speed = min(self.MAX_V, float(self.get_parameter('LINSPEED').value))
         self.omega = min(self.MAX_W, self.linear_speed / self.radius)
+        self.declare_parameter('PATH_TYPE', 'circle')
+        path_type = str(self.get_parameter('PATH_TYPE').value).lower()
+
+        if 'line' in path_type:
+            self.path_type = PATH_TYPE.LINE
+            self.command_callback = self.line_path
+        elif 'square' in path_type:
+            self.path_type = PATH_TYPE.SQUARE
+            self.command_callback = self.square_path
+        else:
+            self.path_type = PATH_TYPE.CIRCLE
+            self.command_callback  = self.simple_circle_path
+
+        self.timer = self.create_timer(0.05, self.command_callback)
 
         # circle path
         self.model_radius = self.radius # what the model thinks the radius is
@@ -73,10 +73,12 @@ class PlatformController(Node):
         self.direction = 1
         self.direction_flipped = False
 
-        # loops path
-        self.HALF_LOOP_TIME = 2 * math.pi / self.omega
-        self.loop_direction = 1
-
+        # square path
+        self.SQUARE_SIDE_LENGTH = 0.8
+        self.SQUARE_TURN_SPEED = 0.5
+        self.SQUARE_STRAIGHT_TIME = self.SQUARE_SIDE_LENGTH / self.linear_speed
+        self.SQUARE_TURN_TIME = (math.pi / 2) / self.SQUARE_TURN_SPEED
+        self.SQUARE_SEGMENT_TIME = self.SQUARE_STRAIGHT_TIME + self.SQUARE_TURN_TIME
 
         self.YAW_JUMP_LIMIT = math.radians(90)
         self.last_pose_time = None
@@ -88,11 +90,18 @@ class PlatformController(Node):
         self.get_logger().info(f"Platform Controller node has begun! Path type {self.path_type}")
         self.get_logger().info(f"Commanding linspeed of {self.linear_speed} and omega {self.omega}")
 
-        self.pred_log = open('line_prediction.csv', 'w', newline="", buffering=1)
-        self.pred_writer = csv.writer(self.pred_log)
-        self.pred_writer.writerow([
-            'time', 'type', 'horizon', 'x', 'y', 'vx', 'vy', 'yaw'
-        ])
+
+        self.declare_parameter('REFERENCE_PREVIEW_ENABLED', True)
+        REFERENCE_PREVIEW_ENABLED = self.get_parameter('REFERENCE_PREVIEW_ENABLED').value
+        self.declare_parameter('PARAMS_FILE', '')
+        PARAMS_FILE = self.get_parameter('PARAMS_FILE').value
+        if PARAMS_FILE:
+            with open(PARAMS_FILE, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['launch', 'reference_preview_enabled', REFERENCE_PREVIEW_ENABLED])
+                writer.writerow(['launch', 'radius', self.radius])
+                writer.writerow(['launch', 'linspeed', self.linear_speed])
+                writer.writerow(['launch', 'path_type', self.path_type])
 
     def nominal_at(self, t):
         cx, cy = self.centre
@@ -166,7 +175,6 @@ class PlatformController(Node):
             self.pose = (x, y, z, yaw)
             self.last_pose_time = self.get_clock().now()
             now = self.get_clock().now().nanoseconds * 1e-9
-            self.pred_writer.writerow([now, 'measured', 0, x, y, '', '', yaw])
             if self.path_type != PATH_TYPE.CIRCLE:
                 if self.calibration_finished_time is None:
                     self.calibration_finished_time = self.get_clock().now()
@@ -224,7 +232,7 @@ class PlatformController(Node):
         self.publish_circle_prediction()
 
 
-    def loops_path(self):
+    def square_path(self):
         now = self.get_clock().now()
         cmd = TwistStamped()
         cmd.header.stamp = now.to_msg()
@@ -241,12 +249,11 @@ class PlatformController(Node):
             self.start_time = now
         
         t = (now - self.start_time).nanoseconds * 1e-9
-        current_cycle_index = int(t//self.HALF_LOOP_TIME)
-        self.loop_direction = 1 if (current_cycle_index % 2 == 0) else -1
-            
-        cmd.twist.linear.x = float(self.linear_speed)
-        cmd.twist.angular.z = float(self.loop_direction * self.omega)
+        v, w = self.square_path_velocities(t)
+        cmd.twist.linear.x = float(v)
+        cmd.twist.angular.z = float(w)
         self.cmd_publisher.publish(cmd)
+        self.publish_non_circle_prediction(t, self.square_path_velocities)
 
     
     def line_path(self):
@@ -274,7 +281,7 @@ class PlatformController(Node):
         cmd.twist.linear.x = float(v)
         cmd.twist.angular.z = float(w)
         self.cmd_publisher.publish(cmd)
-        self.publish_line_prediction(t)
+        self.publish_non_circle_prediction(t, self.line_path_velocities)
 
 
     def line_path_velocities(self, t):
@@ -282,6 +289,13 @@ class PlatformController(Node):
         if cycle_t < self.TRAVEL_TIME:
             return self.linear_speed, 0.0
         return 0.0, self.ANGULAR_SPEED
+
+    
+    def square_path_velocities(self, t):
+        cycle_t = t % self.SQUARE_SEGMENT_TIME
+        if cycle_t < self.SQUARE_STRAIGHT_TIME:
+            return self.linear_speed, 0.0
+        return self.linear_speed, self.SQUARE_TURN_SPEED
 
 
     def publish_circle_prediction(self):
@@ -324,7 +338,7 @@ class PlatformController(Node):
         self.pred_publisher.publish(msg)
 
 
-    def publish_line_prediction(self, t):
+    def publish_non_circle_prediction(self, t, get_velocities):
         if self.pose is None or self.start_time is None:
             return
 
@@ -342,7 +356,7 @@ class PlatformController(Node):
 
         for i in range(self.pred_N + 1):
             future_t = t + i * self.pred_dt
-            v, w = self.line_path_velocities(future_t)
+            v, w = get_velocities(future_t)
             heading = yaw + 2.8
             vx = v * math.cos(heading)
             vy = v * math.sin(heading)
@@ -362,20 +376,9 @@ class PlatformController(Node):
         msg.vx = vxs
         msg.vy = vys
         msg.vz = vzs
-        
-        t_now = now.nanoseconds * 1e-9
-        for i in range(0, self.pred_N + 1, 10):
-            tau = i * self.pred_dt
-            self.pred_writer.writerow([
-                t_now+tau,'prediction', tau, msg.x[i], msg.y[i], msg.vx[i], msg.vy[i], yaws[i]
-            ])
         self.pred_publisher.publish(msg)
 
     
-    
-
-
-
 def main(args=None):
     rclpy.init(args=args)
     node = PlatformController()

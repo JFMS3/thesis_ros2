@@ -32,3 +32,4 @@
     tracking_mode_phi_max: 8
     tracking_mode_theta_max: 8
     tracking_mode_Tdev_max: 0.05
+    control_input_weights: [0.2, 0.2, 0.1]

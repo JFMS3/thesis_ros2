@@ -16,6 +16,7 @@ def generate_launch_description():
     run_name = datetime.now().strftime("mpc_%m-%d_%H-%M")
     log_dir = str(Path.home() / "thesis_logs" / run_name)
     Path(log_dir).mkdir(parents=True, exist_ok=True)
+    params_filename = os.path.join(log_dir, f'params_{run_name}.csv')
 
     mpc_yaml_path = os.path.join(
         get_package_share_directory(mpc_package_name),
@@ -47,7 +48,7 @@ def generate_launch_description():
     declare_path_type = DeclareLaunchArgument(
         'path_type',
         default_value='circle',
-        description='Type of path for platform to follow (circle, line or S-shape)'
+        description='Type of path for platform to follow (circle, line or square)'
     )
     reference_preview_enabled = LaunchConfiguration('reference_preview_enabled')
     radius = LaunchConfiguration('radius')
@@ -63,14 +64,9 @@ def generate_launch_description():
         platform_yaml_data = yaml.safe_load(f)
     platform_kf_params = platform_yaml_data['/platform_kalman_filter']['ros__parameters']
 
-    params_filename = os.path.join(log_dir, f'/params_{run_name}.csv')
     with open(params_filename, 'w', newline="") as f:
         writer = csv.writer(f)
         writer.writerow(['node', 'variable', 'value'])
-        writer.writerow(['launch', 'reference_preview_enabled', reference_preview_enabled])
-        writer.writerow(['launch', 'radius', radius])
-        writer.writerow(['launch', 'linspeed', linspeed])
-        writer.writerow(['launch', 'path_type', path_type])
         for name, value in mpc_params.items():
             writer.writerow(['mpc', name, value])
         for name, value in quad_kf_params.items():
@@ -86,7 +82,6 @@ def generate_launch_description():
         output='screen',
         parameters=[mpc_yaml_path, {
             'reference_preview_enabled': reference_preview_enabled,
-            'path_type': path_type,
             'log_dir': log_dir
         }],
         arguments=['--ros-args', '--log-level', 'info']
@@ -110,7 +105,9 @@ def generate_launch_description():
         parameters=[platform_yaml_path, {
             'RADIUS': radius,
             'LINSPEED': linspeed,
-            'PATH_TYPE': path_type
+            'PATH_TYPE': path_type,
+            'REFERENCE_PREVIEW_ENABLED': reference_preview_enabled,
+            'PARAMS_FILE': params_filename
         }]
     )
     

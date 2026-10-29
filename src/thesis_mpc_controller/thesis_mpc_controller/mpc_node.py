@@ -25,11 +25,6 @@ class MPCNode(Node):
         
         self.declare_parameter('reference_preview_enabled', True)
         self.reference_preview_enabled = self.get_parameter('reference_preview_enabled').value
-        
-        self.declare_parameter('PATH_TYPE', 'circle')
-        path_type = str(self.get_parameter('PATH_TYPE').value).lower()
-        if 'loops' in path_type:
-            self.reference_preview_enabled = False
 
         self.declare_parameter('fs', 20)
         self.fs = self.get_parameter('fs').value
@@ -53,6 +48,7 @@ class MPCNode(Node):
         self.declare_parameter('tracking_mode_phi_max', 8)
         self.declare_parameter('tracking_mode_theta_max', 8)
         self.declare_parameter('tracking_mode_Tdev_max', 0.05)
+        self.declare_parameter('control_input_weights', [0.2, 0.2, 0.1])
 
         Ax = float(self.get_parameter('Ax').value)
         Ay = float(self.get_parameter('Ay').value)
@@ -67,6 +63,7 @@ class MPCNode(Node):
         self.tracking_mode_phi_max = float(self.get_parameter('tracking_mode_phi_max').value)
         self.tracking_mode_theta_max = float(self.get_parameter('tracking_mode_theta_max').value)
         self.tracking_mode_Tdev_max = float(self.get_parameter('tracking_mode_Tdev_max').value)
+        self.control_input_weights = [float(w) for w in self.get_parameter('control_input_weights').value]
   
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -91,19 +88,19 @@ class MPCNode(Node):
         self.mpc_enabled = False
         self.platform_prediction = None
 
-        self.declare_parameter('ENTER_LANDING_POS_THRESHOLD', 0.3) # position error to enter landing mode
+        self.declare_parameter('ENTER_LANDING_POS_THRESHOLD', 0.2) # position error to enter landing mode
         self.ENTER_LANDING_POS_THRESHOLD = float(self.get_parameter('ENTER_LANDING_POS_THRESHOLD').value)
         self.declare_parameter('ENTER_LANDING_SAMPLE_THRESHOLD', 10) # need 10 samples < pos error before entering landing
         self.ENTER_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('ENTER_LANDING_SAMPLE_THRESHOLD').value)
         self.enter_landing_sample_count = 0
 
-        self.declare_parameter('EXIT_LANDING_POS_THRESHOLD', 0.45)
+        self.declare_parameter('EXIT_LANDING_POS_THRESHOLD', 0.3)
         self.EXIT_LANDING_POS_THRESHOLD = float(self.get_parameter('EXIT_LANDING_POS_THRESHOLD').value)
         self.declare_parameter('EXIT_LANDING_SAMPLE_THRESHOLD', 20)
         self.EXIT_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('EXIT_LANDING_SAMPLE_THRESHOLD').value)
         self.declare_parameter('LAND_XY_ERROR_THRESHOLD', 0.1) # position error to cutoff power and land
         self.LAND_XY_ERROR_THRESHOLD = float(self.get_parameter('LAND_XY_ERROR_THRESHOLD').value)
-        self.declare_parameter('LAND_Z_ERROR_THRESHOLD', 0.07)
+        self.declare_parameter('LAND_Z_ERROR_THRESHOLD', 0.05)
         self.LAND_Z_ERROR_THRESHOLD = float(self.get_parameter('LAND_Z_ERROR_THRESHOLD').value)
         self.exit_landing_sample_count = 0
         self.mpc_mode = MPC_MODE.TRACKING
@@ -115,7 +112,6 @@ class MPCNode(Node):
         self.touchdown_height = 0.2
         self.last_platform_direction = None
         
-
         self.quadcopter_subscription = self.create_subscription(
             QuadcopterState,
             '/full_quadcopter_state',
@@ -173,6 +169,8 @@ class MPCNode(Node):
             "platform_vx", "platform_vy", "platform_vz",
             "xy_error", "z_error", "relative_xy_vel",
         ])
+
+        self.update_mpc_weights()
 
         self.get_logger().info(f"MPC node has begun! Reference preview {'enabled' if self.reference_preview_enabled else 'disabled'}")
         self.get_logger().info(f"Logging MPC data to {log_path}")
@@ -364,7 +362,7 @@ class MPCNode(Node):
             theta_max = np.deg2rad(self.tracking_mode_theta_max)
             Tdev_max = self.tracking_mode_Tdev_max
         
-        R_mat = np.diag([0.2, 0.2, 0.1])
+        R_mat = np.diag(self.control_input_weights)
         W = block_diag(Q_mat, R_mat)
         lbu = np.array([-phi_max, -theta_max, -Tdev_max])
         ubu = np.array([phi_max, theta_max, Tdev_max])
