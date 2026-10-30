@@ -204,15 +204,19 @@ class MPCNode(Node):
         self.platform_prediction = msg
 
 
-    def get_landing_xy(self, x, y, vx, vy):
+    def get_landing_xy(self, x, y, vx, vy, update_direction=True):
         offset = self.landing_pad_offset
         speed = sqrt(vx**2 + vy**2)
+        direction = self.last_platform_direction
+
         if np.isfinite(speed) and speed > 0.01:
-            self.last_platform_direction = [vx/speed, vy/speed]
-        if self.last_platform_direction is None:
-            return None
+            direction = [vx/speed, vy/speed]
+            if update_direction:
+                self.last_platform_direction = direction
         
-        dir_x, dir_y = self.last_platform_direction
+        if direction is None:
+            return None
+        dir_x, dir_y = direction
         return (x + offset * dir_x, y + offset * dir_y)
 
 
@@ -232,7 +236,7 @@ class MPCNode(Node):
             for i in range(N):
                 vx = self.platform_prediction.vx[i]
                 vy = self.platform_prediction.vy[i]
-                ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy)
+                ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy, update_direction=False)
                 ref_z, ref_vz = self.get_descent_profile(i)
 
                 refs[i, 0] = ref_x
