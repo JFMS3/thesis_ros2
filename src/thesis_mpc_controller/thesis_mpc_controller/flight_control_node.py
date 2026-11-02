@@ -145,7 +145,7 @@ class FlightControlNode(Node):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = log_dir / f"flight_control_{timestamp}.csv"
 
-        self.log_file = open(log_path, "w", newline="", buffering=1)
+        self.log_file = open(log_path, "a", newline="", buffering=1)
         self.log_writer = csv.writer(self.log_file)
 
         self.log_writer.writerow([

@@ -75,7 +75,7 @@ class PlatformController(Node):
 
         # square path
         self.SQUARE_SIDE_LENGTH = 0.8
-        self.SQUARE_TURN_SPEED = 0.5
+        self.SQUARE_TURN_SPEED = 0.75
         self.SQUARE_STRAIGHT_TIME = self.SQUARE_SIDE_LENGTH / self.linear_speed
         self.SQUARE_TURN_TIME = (math.pi / 2) / self.SQUARE_TURN_SPEED
         self.SQUARE_SEGMENT_TIME = self.SQUARE_STRAIGHT_TIME + self.SQUARE_TURN_TIME
@@ -353,11 +353,12 @@ class PlatformController(Node):
         zs = [z] * (self.pred_N + 1)
         vzs = [0.0] * (self.pred_N + 1)
         yaws = []
+        
 
         for i in range(self.pred_N + 1):
             future_t = t + i * self.pred_dt
             v, w = get_velocities(future_t)
-            heading = yaw + 2.8
+            heading = -yaw - 2.8
             vx = v * math.cos(heading)
             vy = v * math.sin(heading)
 
@@ -369,7 +370,7 @@ class PlatformController(Node):
             x += vx * self.pred_dt
             y += vy * self.pred_dt
             yaw -= w * self.pred_dt
-    
+
         msg.x = xs
         msg.y = ys
         msg.z = zs
