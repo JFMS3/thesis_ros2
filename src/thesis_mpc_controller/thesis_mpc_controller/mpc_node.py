@@ -77,6 +77,7 @@ class MPCNode(Node):
         self.x_hat = None
         self.platform_pos = None
         self.platform_vel = None
+        self.platform_yaw = None
         self.mode = ControllerMode.TRACKING_MODE
         self.timer = self.create_timer(self.h, self.control_loop)
 
@@ -100,7 +101,7 @@ class MPCNode(Node):
         self.EXIT_LANDING_SAMPLE_THRESHOLD = float(self.get_parameter('EXIT_LANDING_SAMPLE_THRESHOLD').value)
         self.declare_parameter('LAND_XY_ERROR_THRESHOLD', 0.1) # position error to cutoff power and land
         self.LAND_XY_ERROR_THRESHOLD = float(self.get_parameter('LAND_XY_ERROR_THRESHOLD').value)
-        self.declare_parameter('LAND_Z_ERROR_THRESHOLD', 0.05)
+        self.declare_parameter('LAND_Z_ERROR_THRESHOLD', 0.06)
         self.LAND_Z_ERROR_THRESHOLD = float(self.get_parameter('LAND_Z_ERROR_THRESHOLD').value)
         self.exit_landing_sample_count = 0
         self.mpc_mode = MPC_MODE.TRACKING
@@ -198,29 +199,34 @@ class MPCNode(Node):
     def platform_callback(self, msg):
         self.platform_pos = np.array(msg.position, dtype=float)
         self.platform_vel = np.array(msg.velocity, dtype=float)
+        self.platform_yaw = -float(msg.attitude[2])
 
 
     def platform_prediction_callback(self, msg):
         self.platform_prediction = msg
 
 
-    def get_landing_xy(self, x, y, vx, vy, update_direction=True):
+    # def get_landing_xy(self, x, y, vx, vy, update_direction=True):
+    #     offset = self.landing_pad_offset
+    #     speed = sqrt(vx**2 + vy**2)
+
+    #     if update_direction and np.isfinite(speed) and speed > 0.01:
+    #         self.last_platform_direction = [vx/speed, vy/speed]
+            
+    #     direction = self.last_platform_direction
+    #     if direction is None:
+    #         return None
+    #     dir_x, dir_y = direction
+    #     return (x + offset * dir_x, y + offset * dir_y)
+
+    def get_landing_xy(self, x, y, heading):
         offset = self.landing_pad_offset
-        speed = sqrt(vx**2 + vy**2)
-        direction = self.last_platform_direction
-
-        if np.isfinite(speed) and speed > 0.01:
-            direction = [vx/speed, vy/speed]
-            if update_direction:
-                self.last_platform_direction = direction
-        
-        if direction is None:
-            return None
-        dir_x, dir_y = direction
-        return (x + offset * dir_x, y + offset * dir_y)
+        ref_x = x + offset * np.cos(heading)
+        ref_y = y + offset * np.sin(heading)
+        return ref_x, ref_y
 
 
-    def get_reference_preview(self):
+    def get_xy_reference_preview(self):
         refs = np.zeros((self.N_horizon + 1, self.nx))
 
         if self.x_hat is None:
@@ -228,23 +234,18 @@ class MPCNode(Node):
             return refs
 
         if self.reference_preview_enabled:
-            if self.platform_prediction is None:
-                self.get_logger().warn("Waiting for platform prediction", throttle_duration_sec=2)
-                return refs
-            
             N = min(self.N_horizon + 1, len(self.platform_prediction.x))
             for i in range(N):
+                heading = -self.platform_prediction.yaw[i] - 2.8
                 vx = self.platform_prediction.vx[i]
                 vy = self.platform_prediction.vy[i]
-                ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy, update_direction=False)
-                ref_z, ref_vz = self.get_descent_profile(i)
+                #ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy, update_direction=False)
+                ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], heading)
 
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
-                refs[i, 2] = ref_z
                 refs[i, 3] = vx
                 refs[i, 4] = vy
-                refs[i, 5] = ref_vz
 
             for i in range(N, self.N_horizon + 1):
                 refs[i, :] = refs[N-1, :] # bit of padding if horizons dont match
@@ -254,15 +255,21 @@ class MPCNode(Node):
             for i in range(self.N_horizon + 1):  
                 pred_x = x + vx * i * self.h
                 pred_y = y + vy * i * self.h
-                ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, vx, vy)
-                ref_z, ref_vz = self.get_descent_profile(i)
+                
+                heading = -self.platform_yaw - 2.8
+                ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, heading)
+                #ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, vx, vy, update_direction=False)
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
-                refs[i, 2] = ref_z
                 refs[i, 3] = vx
                 refs[i, 4] = vy
-                refs[i, 5] = ref_vz
 
+        return refs
+
+
+    def add_z_reference_preview(self, refs):
+        for i in range(self.N_horizon + 1):
+            refs[i, 2], refs[i, 5] = self.get_descent_profile(i)
         return refs
 
 
@@ -277,13 +284,8 @@ class MPCNode(Node):
             self.mpc_enabled_at = self.get_clock().now()
 
 
-    def get_xy_error(self):
-        quadcopter_x, quadcopter_y, _ = self.quadcopter_pos
-        platform_x, platform_y, _ = self.platform_pos
-        platform_vx, platform_vy, _ = self.platform_vel
-
-        landing_x, landing_y = self.get_landing_xy(platform_x, platform_y, platform_vx, platform_vy)
-        error = (quadcopter_x - landing_x) ** 2 + (quadcopter_y - landing_y) ** 2
+    def get_xy_error(self, ref_x, ref_y):
+        error = (self.quadcopter_pos[0] - ref_x) ** 2 + (self.quadcopter_pos[1] - ref_y) ** 2
         return sqrt(error)
 
 
@@ -298,8 +300,7 @@ class MPCNode(Node):
         return sqrt((quadcopter_vx - platform_vx)**2 + (quadcopter_vy - platform_vy)**2 + (quadcopter_vz - platform_vz)**2)
 
 
-    def set_tracking_mode(self):
-        xy_error = self.get_xy_error()
+    def set_tracking_mode(self, xy_error):
         relative_vel = self.get_relative_vel()
         if self.mpc_mode == MPC_MODE.TRACKING:
             if xy_error < self.ENTER_LANDING_POS_THRESHOLD and relative_vel <= 0.25:
@@ -391,8 +392,21 @@ class MPCNode(Node):
         if quadcopter_state_age > 0.15:
             self.get_logger().warn(f"Haven't received valid quadcopter state for {quadcopter_state_age:.2f}s, not solving MPC", throttle_duration_sec=1.0)
             return
-        
-        xy_error = self.get_xy_error()
+
+        if self.reference_preview_enabled:
+            pred = self.platform_prediction
+            if pred is None:
+                self.get_logger().warn("Waiting for platform prediction", throttle_duration_sec=2)
+                return
+
+            for arr in [pred.x, pred.y, pred.vx, pred.vy]:
+                if len(arr) < self.N_horizon + 1:
+                    return
+
+        #self.get_landing_xy(self.platform_pos[0], self.platform_pos[1], self.platform_vel[0], self.platform_vel[1], update_direction=True)
+        refs = self.get_xy_reference_preview()
+
+        xy_error = self.get_xy_error(refs[0, 0], refs[0, 1])
         z_error = self.get_z_error()
         sufficiently_close = xy_error < self.LAND_XY_ERROR_THRESHOLD and 0 < z_error < self.LAND_Z_ERROR_THRESHOLD
         quadcopter_speed = sqrt(self.quadcopter_vel[0]**2 + self.quadcopter_vel[1]**2 + self.quadcopter_vel[2]**2)
@@ -410,8 +424,9 @@ class MPCNode(Node):
             self.mpc_enabled = False
             return
 
-        self.set_tracking_mode()
-        refs = self.get_reference_preview()
+        
+        self.set_tracking_mode(xy_error)
+        refs = self.add_z_reference_preview(refs)
 
         for k in range(self.N_horizon):
             yref_k = np.concatenate([refs[k, :], np.zeros(self.nu)])

@@ -87,6 +87,7 @@ Your CrazyRadio should now briefly glow white when connected, meaning it is oper
 ## Manual Control
 To manually control the drone, connect a game controller to your computer and open the UI client.
 To do this, pip install the cf-client Python package (ideally in a virtual environment) and run the cf-client command.
+If executing commands (like starting your venv) is disabled run this in powershell: `Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process`
 
 ```python
 py -3.12 -m venv ~/cf-venv  # create virtual environment using Python 3.12 version (use your own version)

@@ -75,7 +75,7 @@ class PlatformController(Node):
 
         # square path
         self.SQUARE_SIDE_LENGTH = 0.8
-        self.SQUARE_TURN_SPEED = 0.75
+        self.SQUARE_TURN_SPEED = 0.9
         self.SQUARE_STRAIGHT_TIME = self.SQUARE_SIDE_LENGTH / self.linear_speed
         self.SQUARE_TURN_TIME = (math.pi / 2) / self.SQUARE_TURN_SPEED
         self.SQUARE_SEGMENT_TIME = self.SQUARE_STRAIGHT_TIME + self.SQUARE_TURN_TIME
@@ -286,8 +286,12 @@ class PlatformController(Node):
 
     def line_path_velocities(self, t):
         cycle_t = t % self.TOTAL_CYCLE_TIME
-        if cycle_t < self.TRAVEL_TIME:
+        decel_time = 1
+        if cycle_t < self.TRAVEL_TIME - decel_time:
             return self.linear_speed, 0.0
+        elif cycle_t < self.TRAVEL_TIME:
+            remaining_t = self.TRAVEL_TIME - cycle_t
+            return self.linear_speed * remaining_t / decel_time, 0.0
         return 0.0, self.ANGULAR_SPEED
 
     
@@ -311,7 +315,7 @@ class PlatformController(Node):
         zs = [self.pose[2]] * (self.pred_N + 1)
         vzs = [0.0] * (self.pred_N + 1)
 
-        xs, ys, vxs, vys = [], [], [], []
+        xs, ys, vxs, vys, yaws = [], [], [], [], []
         r = self.model_radius + self.off_r
         delta_phi = self.off_t / self.model_radius
 
@@ -324,10 +328,12 @@ class PlatformController(Node):
             y = self.centre[1] + r * math.sin(phi)
             vx = -r * self.omega * math.sin(phi)
             vy = r * self.omega * math.cos(phi)
+            yaw = self.pose[3] - self.omega * tau
             xs.append(x)
             ys.append(y)
             vxs.append(vx)
             vys.append(vy)
+            yaws.append(yaw)
 
         msg.x = xs
         msg.y = ys
@@ -335,6 +341,7 @@ class PlatformController(Node):
         msg.vx = vxs
         msg.vy = vys
         msg.vz = vzs
+        msg.yaw = yaws
         self.pred_publisher.publish(msg)
 
 
@@ -377,6 +384,7 @@ class PlatformController(Node):
         msg.vx = vxs
         msg.vy = vys
         msg.vz = vzs
+        msg.yaw = yaws
         self.pred_publisher.publish(msg)
 
     

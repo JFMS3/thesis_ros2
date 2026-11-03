@@ -7,3 +7,4 @@ float64[] z
 float64[] vx
 float64[] vy
 float64[] vz
+float64[] yaw
