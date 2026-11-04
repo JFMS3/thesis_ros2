@@ -124,6 +124,7 @@ ros2 run thesis_optitrack_bridge hover_test_node
 
 (when done)
 usbipd detach --busid <BUS_ID>
+usbipd unbind --busid <BUS_ID>
 ```
 
 # Troubleshooting

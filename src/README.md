@@ -15,6 +15,9 @@ ros2 run thesis_mpc_controller kalman_filter_node --ros-args -p R_pos_diag:="[1.
 ros2 run thesis_mpc_controller synthetic_source
 ros2 bag record /full_quadcopter_state /observed_nis -o nis_test
 
+For a clean build execute the following
+`rm -rf build/ install/ log/ && colcon build --symlink-install`
+
 
 ## Acados and Casadi installation
 _Casadi_ provides a framework for symbollically defining system dynamics and cost equations.

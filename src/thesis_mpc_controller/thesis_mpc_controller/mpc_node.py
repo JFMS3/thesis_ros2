@@ -206,19 +206,6 @@ class MPCNode(Node):
         self.platform_prediction = msg
 
 
-    # def get_landing_xy(self, x, y, vx, vy, update_direction=True):
-    #     offset = self.landing_pad_offset
-    #     speed = sqrt(vx**2 + vy**2)
-
-    #     if update_direction and np.isfinite(speed) and speed > 0.01:
-    #         self.last_platform_direction = [vx/speed, vy/speed]
-            
-    #     direction = self.last_platform_direction
-    #     if direction is None:
-    #         return None
-    #     dir_x, dir_y = direction
-    #     return (x + offset * dir_x, y + offset * dir_y)
-
     def get_landing_xy(self, x, y, heading):
         offset = self.landing_pad_offset
         ref_x = x + offset * np.cos(heading)
@@ -239,7 +226,6 @@ class MPCNode(Node):
                 heading = -self.platform_prediction.yaw[i] - 2.8
                 vx = self.platform_prediction.vx[i]
                 vy = self.platform_prediction.vy[i]
-                #ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], vx, vy, update_direction=False)
                 ref_x, ref_y = self.get_landing_xy(self.platform_prediction.x[i], self.platform_prediction.y[i], heading)
 
                 refs[i, 0] = ref_x
@@ -258,7 +244,6 @@ class MPCNode(Node):
                 
                 heading = -self.platform_yaw - 2.8
                 ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, heading)
-                #ref_x, ref_y = self.get_landing_xy(pred_x, pred_y, vx, vy, update_direction=False)
                 refs[i, 0] = ref_x
                 refs[i, 1] = ref_y
                 refs[i, 3] = vx
@@ -403,7 +388,6 @@ class MPCNode(Node):
                 if len(arr) < self.N_horizon + 1:
                     return
 
-        #self.get_landing_xy(self.platform_pos[0], self.platform_pos[1], self.platform_vel[0], self.platform_vel[1], update_direction=True)
         refs = self.get_xy_reference_preview()
 
         xy_error = self.get_xy_error(refs[0, 0], refs[0, 1])
