@@ -21,8 +21,8 @@
     Ax: 0.6
     Ay: 0.6
     Az: 0.6
-    tau_phi: 94.6e-3
-    tau_theta: 94.6e-3
+    tau_phi: 0.16 # 94.6e-3
+    tau_theta: 0.16 # 94.6e-3
     m: 0.04
     landing_mode_weights: [12, 12, 8, 4, 4, 3, 0, 0]
     landing_mode_phi_max: 3
@@ -33,4 +33,4 @@
     tracking_mode_theta_max: 8
     tracking_mode_Tdev_max: 0.05
     control_input_weights: [0.2, 0.2, 0.1]
-    control_rate_weights: [0.05, 0.05, 0.0]
+    control_rate_weights: [2.0, 2.0, 0.5]

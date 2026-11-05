@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from thesis_interfaces.msg import QuadcopterState, PlatformState, ControllerMode, MPCCommand, PlatformPrediction
-from .quadcopter_solver import setup_ocp_solver
+from .quadcopter_solver import setup_ocp_solver, setup_ocp_solver_new
 import numpy as np
 from math import isfinite, sqrt
 import csv
@@ -38,8 +38,8 @@ class MPCNode(Node):
         self.declare_parameter('Ax', 0.6)
         self.declare_parameter('Ay', 0.6)
         self.declare_parameter('Az', 0.6)
-        self.declare_parameter('tau_phi', 94.6e-4)
-        self.declare_parameter('tau_theta', 94.6e-4)
+        self.declare_parameter('tau_phi', 94.6e-3)
+        self.declare_parameter('tau_theta', 94.6e-3)
         self.declare_parameter('landing_mode_weights', [12, 12, 8, 2, 2, 3, 0, 0])
         self.declare_parameter('landing_mode_phi_max', 3)
         self.declare_parameter('landing_mode_theta_max', 3)
@@ -69,8 +69,9 @@ class MPCNode(Node):
     
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.u_prev = np.zeros(3)
 
-        self.ocp, self.ocp_solver = setup_ocp_solver(
+        self.ocp, self.ocp_solver = setup_ocp_solver_new(
             x0_init, self.N_horizon, self.Tf, Ax, Ay, Az, tau_phi, tau_theta, m
         )
 
@@ -216,7 +217,7 @@ class MPCNode(Node):
 
 
     def get_xy_reference_preview(self):
-        refs = np.zeros((self.N_horizon + 1, self.nx))
+        refs = np.zeros((self.N_horizon + 1, self.nx - self.nu))
 
         if self.x_hat is None:
             self.get_logger().warn("Waiting for quadcopter state", throttle_duration_sec=2)
@@ -355,8 +356,8 @@ class MPCNode(Node):
             Tdev_max = self.tracking_mode_Tdev_max
         
         R_mat = np.diag(self.control_input_weights)
-        #Rd_mat = np.diag(self.control_rate_weights)
-        W = block_diag(Q_mat, R_mat) #, Rd_mat
+        Rd_mat = np.diag(self.control_rate_weights)
+        W = block_diag(Q_mat, R_mat, Rd_mat)
         lbu = np.array([-phi_max, -theta_max, -Tdev_max])
         ubu = np.array([phi_max, theta_max, Tdev_max])
 
@@ -414,13 +415,14 @@ class MPCNode(Node):
         
         self.set_tracking_mode(xy_error)
         refs = self.add_z_reference_preview(refs)
+        refs = np.hstack([refs, np.zeros((refs.shape[0], 6))])
 
         for k in range(self.N_horizon):
-            yref_k = np.concatenate([refs[k, :], np.zeros(self.nu)])
-            self.ocp_solver.cost_set(k, 'yref', yref_k)
-        self.ocp_solver.cost_set(self.N_horizon, 'yref', refs[self.N_horizon, :])
+            self.ocp_solver.cost_set(k, 'yref', refs[k, :])
+        self.ocp_solver.cost_set(self.N_horizon, 'yref', refs[self.N_horizon, :8])
 
-        u_opt = self.ocp_solver.solve_for_x0(x0_bar=self.x_hat, fail_on_nonzero_status=False)
+        x0_aug = np.concatenate([self.x_hat, self.u_prev])
+        u_opt = self.ocp_solver.solve_for_x0(x0_bar=x0_aug, fail_on_nonzero_status=False)
         solver_status = self.ocp_solver.status
         solver_time = self.ocp_solver.get_stats('time_tot')
 
@@ -434,8 +436,11 @@ class MPCNode(Node):
                 self.get_logger().error("Invalid MPC command")
                 return
             self.cmd_publisher.publish(cmd)
+            self.u_prev = np.array([cmd.phi_cmd, cmd.theta_cmd, cmd.thrust_dev])
         else:
             self.get_logger().warn(f'MPC solver failed with status {self.ocp_solver.status}')
+
+        
 
         total_loop_time = time.perf_counter() - control_loop_start
         relative_speed = self.get_relative_vel()
