@@ -49,6 +49,7 @@ class MPCNode(Node):
         self.declare_parameter('tracking_mode_theta_max', 8)
         self.declare_parameter('tracking_mode_Tdev_max', 0.05)
         self.declare_parameter('control_input_weights', [0.2, 0.2, 0.1])
+        self.declare_parameter('control_rate_weights', [0.05, 0.05, 0.0])
 
         Ax = float(self.get_parameter('Ax').value)
         Ay = float(self.get_parameter('Ay').value)
@@ -64,7 +65,8 @@ class MPCNode(Node):
         self.tracking_mode_theta_max = float(self.get_parameter('tracking_mode_theta_max').value)
         self.tracking_mode_Tdev_max = float(self.get_parameter('tracking_mode_Tdev_max').value)
         self.control_input_weights = [float(w) for w in self.get_parameter('control_input_weights').value]
-  
+        self.control_rate_weights = [float(w) for w in self.get_parameter('control_rate_weights').value]
+    
         m = 40e-3
         x0_init = np.array([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -353,7 +355,8 @@ class MPCNode(Node):
             Tdev_max = self.tracking_mode_Tdev_max
         
         R_mat = np.diag(self.control_input_weights)
-        W = block_diag(Q_mat, R_mat)
+        #Rd_mat = np.diag(self.control_rate_weights)
+        W = block_diag(Q_mat, R_mat) #, Rd_mat
         lbu = np.array([-phi_max, -theta_max, -Tdev_max])
         ubu = np.array([phi_max, theta_max, Tdev_max])
 
