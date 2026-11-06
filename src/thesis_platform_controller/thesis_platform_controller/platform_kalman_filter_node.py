@@ -107,7 +107,7 @@ class PlatformKalmanFilterNode(Node):
             return
 
         dt = stamp - self.prev_stamp
-        if dt <= 0:
+        if dt < 0.004:
             return
         self.pos_window.append((stamp, pos.copy()))
 
@@ -133,7 +133,7 @@ class PlatformKalmanFilterNode(Node):
         if ok:
             self.last_good_pos = pos.copy()
             self.last_good_stamp = stamp
-        elif elapsed > 0.5 and len(self.pos_window) == 20:
+        elif elapsed > 0.2 and len(self.pos_window) == 20:
             self.get_logger().info("0.5s+ since KF accepted a mocap measurement, attempting KF reset to accept good measurements again")
             samples = list(self.pos_window)
             times = np.array([s[0] for s in samples])
